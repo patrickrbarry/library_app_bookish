@@ -1,266 +1,393 @@
-// MAIN.JS – Bookish (warm) with reusable barcode scanner
-// -----------------------------------------------
+// main.js
 
-// 1. Library data
+// ----------------------
+// State & persistence
+// ----------------------
+let library = [];
 
-const initialBooks = (window.BOOKS && Array.isArray(window.BOOKS))
-  ? window.BOOKS
-  : [];
-
-let library = [...initialBooks];
-
-// 2. DOM references
-
-const tableBody = document.getElementById('booksTableBody');
-const emptyState = document.getElementById('emptyState');
-const totalBadge = document.getElementById('totalBadge');
-const visibleCountMeta = document.getElementById('visibleCountMeta');
-
-const searchInput = document.getElementById('searchInput');
-const statusFilterGroup = document.getElementById('statusFilterGroup');
-
-const scanButton = document.getElementById('scanButton');
-const stopButton = document.getElementById('stopButton');
-const scannerStatus = document.getElementById('scannerStatus');
-const videoWrap = document.getElementById('videoWrap');
-const videoElem = document.getElementById('preview');
-
-// ZXing
-let codeReader = null;
-let isScanning = false;
-
-// Current filters
-let currentStatusFilter = 'all';
-let currentSearchTerm = '';
-
-// -----------------------------------------------
-// Library rendering & filtering
-// -----------------------------------------------
-
-function normalizeStatus(raw) {
-  if (!raw) return 'unknown';
-
-  const s = String(raw).toLowerCase();
-  if (s.includes('unread') || s.includes('to read') || s === 'tbr') return 'unread';
-  if (s.includes('reading') || s.includes('in progress') || s.includes('current')) return 'reading';
-  if (s.includes('read') || s.includes('finished') || s.includes('complete')) return 'read';
-
-  return 'unknown';
+function loadLibrary() {
+  try {
+    const stored = localStorage.getItem(BOOKISH_STORAGE_KEY);
+    if (stored) {
+      library = JSON.parse(stored);
+      return;
+    }
+  } catch (e) {
+    console.warn("Error reading local storage, falling back to initial data.", e);
+  }
+  // fallback to seed
+  library = Array.isArray(INITIAL_BOOKS) ? [...INITIAL_BOOKS] : [];
+  saveLibrary();
 }
 
-function normalizeFormat(raw) {
-  if (!raw) return 'unknown';
-  const s = String(raw).toLowerCase();
-  if (s.includes('audible') || s.includes('audio')) return 'audio';
-  if (s.includes('kindle') || s.includes('ebook') || s.includes('e-book')) return 'kindle';
-  if (s.includes('physical') || s.includes('paper') || s.includes('hard') || s.includes('print')) return 'physical';
-  return raw;
+function saveLibrary() {
+  try {
+    localStorage.setItem(BOOKISH_STORAGE_KEY, JSON.stringify(library));
+  } catch (e) {
+    console.warn("Error saving to local storage.", e);
+  }
 }
 
-function getYearFromBook(book) {
-  if (book.year) return book.year;
-  if (book.publication_date) {
-    const match = String(book.publication_date).match(/\b(\d{4})\b/);
-    if (match) return match[1];
+// ----------------------
+// DOM helpers
+// ----------------------
+const $ = (id) => document.getElementById(id);
+
+const searchInput = $("searchInput");
+const statusFilter = $("statusFilter");
+const formatFilter = $("formatFilter");
+const clearFiltersButton = $("clearFiltersButton");
+const statusLine = $("statusLine");
+const totalBadge = $("totalBadge");
+const filteredCountLabel = $("filteredCountLabel");
+const tableBody = $("booksTableBody");
+
+const scanButton = $("scanButton");
+const stopScanButton = $("stopScanButton");
+const cameraPanel = $("cameraPanel");
+const cameraPreview = $("cameraPreview");
+
+let currentScanner = null;
+let scannerActive = false;
+
+// ----------------------
+// Filtering & rendering
+// ----------------------
+function getFilteredBooks() {
+  const query = (searchInput.value || "").toLowerCase().trim();
+  const statusVal = statusFilter.value;
+  const formatVal = formatFilter.value;
+
+  return library.filter((book) => {
+    // text match
+    if (query) {
+      const haystack = [
+        book.title,
+        book.author,
+        book.genre,
+        book.notes,
+        book.isbn
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+
+    if (statusVal !== "all" && book.status !== statusVal) return false;
+    if (formatVal !== "all" && book.format !== formatVal) return false;
+
+    return true;
+  });
+}
+
+function formatFormatLabel(fmt) {
+  switch (fmt) {
+    case "audible":
+      return "Audible";
+    case "kindle":
+      return "Kindle / eBook";
+    case "physical":
+      return "Physical";
+    case "multiple":
+      return "Multiple formats";
+    default:
+      return fmt || "—";
   }
-  if (book.publishDate) {
-    const match = String(book.publishDate).match(/\b(\d{4})\b/);
-    if (match) return match[1];
+}
+
+function formatStatusChip(status) {
+  const base = document.createElement("span");
+  base.className = "chip chip-muted";
+  const dot = document.createElement("span");
+  dot.className = "chip-dot";
+  base.appendChild(dot);
+
+  const text = document.createElement("span");
+  if (status === "read") {
+    base.className = "chip chip-green";
+    text.textContent = "Read";
+  } else if (status === "reading") {
+    text.textContent = "Reading";
+  } else if (status === "unread") {
+    text.textContent = "Unread";
+  } else {
+    text.textContent = status || "Unknown";
   }
-  return '';
+  base.appendChild(text);
+  return base;
 }
 
 function renderLibrary() {
-  const term = currentSearchTerm.trim().toLowerCase();
+  const books = getFilteredBooks();
+  tableBody.innerHTML = "";
 
-  const filtered = library.filter((book) => {
-    const statusNorm = normalizeStatus(book.status || book.read_status || '');
-    const matchesStatus =
-      currentStatusFilter === 'all' || statusNorm === currentStatusFilter;
+  books.forEach((book) => {
+    const tr = document.createElement("tr");
 
-    if (!matchesStatus) return false;
+    // Title & status
+    const tdTitle = document.createElement("td");
+    tdTitle.className = "title-cell";
+    const titleDiv = document.createElement("div");
+    titleDiv.textContent = book.title || "(Untitled)";
+    tdTitle.appendChild(titleDiv);
 
-    if (!term) return true;
+    const metaDiv = document.createElement("div");
+    metaDiv.className = "muted";
+    const statusChip = formatStatusChip(book.status);
+    metaDiv.appendChild(statusChip);
 
-    const title = (book.title || '').toLowerCase();
-    const author = (book.author || '').toLowerCase();
-    return title.includes(term) || author.includes(term);
-  });
+    if (book.genre) {
+      const spacer = document.createTextNode(" · ");
+      metaDiv.appendChild(spacer);
+      metaDiv.appendChild(document.createTextNode(book.genre));
+    }
 
-  tableBody.innerHTML = '';
-
-  if (!filtered.length) {
-    emptyState.style.display = 'block';
-  } else {
-    emptyState.style.display = 'none';
-  }
-
-  filtered.forEach((book) => {
-    const tr = document.createElement('tr');
-
-    const statusNorm = normalizeStatus(book.status || book.read_status || '');
-    const formatNorm = normalizeFormat(book.format || book.medium || '');
-    const year = getYearFromBook(book);
-
-    // Title
-    const tdTitle = document.createElement('td');
-    tdTitle.className = 'title-cell';
-    tdTitle.textContent = book.title || '';
-    tr.appendChild(tdTitle);
+    tdTitle.appendChild(metaDiv);
 
     // Author
-    const tdAuthor = document.createElement('td');
-    tdAuthor.className = 'author-cell';
-    tdAuthor.textContent = book.author || '';
-    tr.appendChild(tdAuthor);
-
-    // Status
-    const tdStatus = document.createElement('td');
-    const statusTag = document.createElement('span');
-    statusTag.classList.add('tag');
-    if (statusNorm === 'read') statusTag.classList.add('tag-status-read');
-    if (statusNorm === 'unread' || statusNorm === 'reading') statusTag.classList.add('tag-status-unread');
-    statusTag.textContent =
-      statusNorm === 'read'
-        ? 'Finished'
-        : statusNorm === 'reading'
-        ? 'In progress'
-        : statusNorm === 'unread'
-        ? 'Unread'
-        : (book.status || '—');
-    tdStatus.appendChild(statusTag);
-    tr.appendChild(tdStatus);
+    const tdAuthor = document.createElement("td");
+    tdAuthor.textContent = book.author || "—";
 
     // Format
-    const tdFormat = document.createElement('td');
-    const formatTag = document.createElement('span');
-    formatTag.classList.add('tag', 'tag-format');
-    formatTag.textContent =
-      formatNorm === 'audio'
-        ? 'Audio'
-        : formatNorm === 'kindle'
-        ? 'Kindle'
-        : formatNorm === 'physical'
-        ? 'Physical'
-        : (book.format || '—');
-    tdFormat.appendChild(formatTag);
-    tr.appendChild(tdFormat);
+    const tdFormat = document.createElement("td");
+    const fmt = book.format || "";
+    if (fmt) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      const dot = document.createElement("span");
+      dot.className = "chip-dot";
+      chip.appendChild(dot);
+      chip.appendChild(
+        document.createTextNode(formatFormatLabel(fmt))
+      );
+      tdFormat.appendChild(chip);
+    } else {
+      tdFormat.textContent = "—";
+    }
 
-    // Year
-    const tdYear = document.createElement('td');
-    tdYear.textContent = year || '—';
-    tr.appendChild(tdYear);
+    // ISBN
+    const tdIsbn = document.createElement("td");
+    tdIsbn.className = "nowrap";
+    tdIsbn.textContent = book.isbn || "—";
+
+    tr.appendChild(tdTitle);
+    tr.appendChild(tdAuthor);
+    tr.appendChild(tdFormat);
+    tr.appendChild(tdIsbn);
 
     tableBody.appendChild(tr);
   });
 
-  // badges
-  totalBadge.textContent = `${library.length} book${library.length === 1 ? '' : 's'}`;
-  visibleCountMeta.textContent = `${filtered.length} showing`;
+  // header badges
+  totalBadge.textContent = `${library.length} book${library.length === 1 ? "" : "s"}`;
+  filteredCountLabel.textContent =
+    books.length === library.length
+      ? `${books.length} showing`
+      : `${books.length} showing of ${library.length}`;
 }
 
-// -----------------------------------------------
-// Filter + search wiring
-// -----------------------------------------------
-
-searchInput.addEventListener('input', () => {
-  currentSearchTerm = searchInput.value;
+function clearFilters() {
+  searchInput.value = "";
+  statusFilter.value = "all";
+  formatFilter.value = "all";
   renderLibrary();
-});
-
-statusFilterGroup.addEventListener('click', (evt) => {
-  const pill = evt.target.closest('.pill');
-  if (!pill) return;
-
-  const status = pill.getAttribute('data-status');
-  if (!status) return;
-
-  currentStatusFilter = status;
-
-  Array.from(statusFilterGroup.querySelectorAll('.pill')).forEach((el) => {
-    el.classList.toggle('active', el === pill);
-  });
-
-  renderLibrary();
-});
-
-// -----------------------------------------------
-// Scanner helpers
-// -----------------------------------------------
-
-function setScannerStatus(text, emphasize) {
-  if (!scannerStatus) return;
-  if (emphasize) {
-    scannerStatus.innerHTML = text;
-  } else {
-    scannerStatus.textContent = text;
-  }
+  setStatus("Filters cleared.");
 }
 
-function showVideo(show) {
-  if (show) {
-    videoWrap.style.display = 'block';
-  } else {
-    videoWrap.style.display = 'none';
-  }
+// ----------------------
+// Status line
+// ----------------------
+function setStatus(msg) {
+  statusLine.innerHTML = msg
+    ? msg.replace(/`([^`]+)`/g, "<code>$1</code>")
+    : "";
 }
 
-function addOrUpdateBook(book) {
-  const isbn = (book.isbn || '').trim();
-  if (!isbn) {
-    library.push(book);
-  } else {
-    const existingIndex = library.findIndex((b) => (b.isbn || '').trim() === isbn);
-    if (existingIndex >= 0) {
-      library[existingIndex] = { ...library[existingIndex], ...book };
-    } else {
-      library.push(book);
-    }
-  }
-  renderLibrary();
-}
-
+// ----------------------
+// Scanner & ISBN lookup
+// ----------------------
 async function lookupBookByIsbn(isbnRaw) {
-  const isbn = (isbnRaw || '').replace(/[^0-9X]/gi, '');
-  if (!isbn) {
-    setScannerStatus('Barcode detected, but ISBN was not readable. Try again closer to the code.');
+  const cleaned = (isbnRaw || "").replace(/[^0-9X]/gi, "");
+  if (!cleaned) {
+    setStatus("I saw a barcode, but couldn’t make sense of the ISBN.");
     return;
   }
 
-  setScannerStatus(`Scanned ISBN <strong>${isbn}</strong>. Looking up details…`, true);
+  setStatus(`Scanned ISBN <strong>${cleaned}</strong>. Looking up details…`);
+
+  // If already in library, just surface it and don't hit API
+  const existing = library.find((b) => b.isbn === cleaned);
+  if (existing) {
+    setStatus(
+      `You already have <strong>${existing.title || "this book"}</strong> in your library.`
+    );
+    renderLibrary();
+    return;
+  }
 
   try {
-    const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`;
+    const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${cleaned}&format=json&jscmd=data`;
     const resp = await fetch(url);
     const json = await resp.json();
-    const key = `ISBN:${isbn}`;
+    const key = `ISBN:${cleaned}`;
     const info = json[key];
 
-    if (!info) {
-      setScannerStatus(
-        `No metadata found for ISBN <strong>${isbn}</strong>. A blank entry was added so you can fill it in.`,
-        true
+    let title = "";
+    let author = "";
+    let publicationDate = "";
+
+    if (info) {
+      title = info.title || "";
+      if (Array.isArray(info.authors) && info.authors[0]) {
+        author = info.authors[0].name || "";
+      }
+      publicationDate = info.publish_date || "";
+    }
+
+    const newBook = {
+      id: `isbn-${cleaned}-${Date.now()}`,
+      title: title || "(Untitled)",
+      author: author || "",
+      status: "unread",
+      format: "physical",
+      genre: "", // you can later run your classifier to fill this
+      notes: "",
+      isbn: cleaned,
+      publicationDate,
+      addedAt: new Date().toISOString().slice(0, 10)
+    };
+
+    library.push(newBook);
+    saveLibrary();
+    renderLibrary();
+
+    if (title) {
+      setStatus(
+        `Added <strong>${title}</strong>${author ? " by <strong>" + author + "</strong>" : ""}${
+          publicationDate ? " (" + publicationDate + ")" : ""
+        }.`
       );
-      addOrUpdateBook({ isbn, title: '', author: '', publishDate: '' });
+    } else {
+      setStatus(
+        `ISBN <strong>${cleaned}</strong> added. I couldn’t find metadata, but it’s now in your library.`
+      );
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus(
+      "I had trouble talking to Open Library. The ISBN was read, but I couldn’t fetch details."
+    );
+  }
+}
+
+async function startScanner() {
+  if (scannerActive) return;
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert("Camera access isn’t supported in this browser.");
+    return;
+  }
+
+  if (!window.ZXingBrowser || !ZXingBrowser.BrowserMultiFormatReader) {
+    alert("Barcode library did not load. Check your network connection.");
+    return;
+  }
+
+  try {
+    const reader = new ZXingBrowser.BrowserMultiFormatReader();
+    currentScanner = reader;
+    scannerActive = true;
+
+    cameraPanel.style.display = "block";
+    scanButton.disabled = true;
+    stopScanButton.style.display = "inline-flex";
+    setStatus("Starting camera…");
+
+    const devices =
+      (await ZXingBrowser.BrowserCodeReader.listVideoInputDevices()) || [];
+    if (!devices.length) {
+      setStatus("I couldn’t find a camera on this device.");
+      stopScanner();
       return;
     }
 
-    const title = info.title || '';
-    const author = (info.authors && info.authors[0] && info.authors[0].name) || '';
-    const publishDate = info.publish_date || '';
+    const backCam =
+      devices.find((d) => /back|environment/i.test(d.label)) || devices[0];
 
-    addOrUpdateBook({
-      isbn,
-      title,
-      author,
-      publishDate,
-      format: 'physical',
-      status: 'unread',
-    });
+    setStatus("Point your camera at the barcode on the back cover…");
 
-    const year = publishDate && publishDate.match(/\b(\d{4})\b/)
-      ? publishDate.match(/\b(\d{4})\b/)[1]
-      : '';
+    reader
+      .decodeOnceFromVideoDevice(backCam.deviceId, cameraPreview)
+      .then((result) => {
+        const text =
+          result && (result.text || (result.getText && result.getText()));
+        stopScanner();
+        if (!text) {
+          setStatus("I saw a barcode, but couldn’t read it clearly. Try again?");
+          return;
+        }
+        lookupBookByIsbn(text);
+      })
+      .catch((err) => {
+        console.error("Decode error", err);
+        stopScanner();
+        setStatus(
+          "I couldn’t read a barcode. Try moving closer, adjusting the angle, or checking the lighting."
+        );
+      });
+  } catch (err) {
+    console.error("Error starting scanner", err);
+    setStatus("Something went sideways when trying to start the camera.");
+    stopScanner();
+  }
+}
 
-    setScannerStatus(
-      `Added <strong>“${title || 'Untitled'}”</strong> by ${author
+function stopScanner() {
+  if (currentScanner) {
+    try {
+      currentScanner.reset();
+    } catch (e) {
+      console.warn("Error resetting scanner", e);
+    }
+    currentScanner = null;
+  }
+  scannerActive = false;
+  cameraPanel.style.display = "none";
+  scanButton.disabled = false;
+  stopScanButton.style.display = "none";
+}
+
+// ----------------------
+// Event wiring
+// ----------------------
+document.addEventListener("DOMContentLoaded", () => {
+  loadLibrary();
+  renderLibrary();
+  setStatus("Ready when you are. Try scanning a book or searching your shelves.");
+
+  searchInput.addEventListener("input", () => {
+    renderLibrary();
+  });
+
+  statusFilter.addEventListener("change", () => {
+    renderLibrary();
+  });
+
+  formatFilter.addEventListener("change", () => {
+    renderLibrary();
+  });
+
+  clearFiltersButton.addEventListener("click", () => {
+    clearFilters();
+  });
+
+  scanButton.addEventListener("click", () => {
+    startScanner();
+  });
+
+  stopScanButton.addEventListener("click", () => {
+    setStatus("Scanner stopped for now.");
+    stopScanner();
+  });
+});
