@@ -1,560 +1,288 @@
-// main.js
-// Main application logic for Bookish Library
-
-let sortField = null;
-let sortDir = 'asc';
-let currentDetailBook = null;
-
-// DOM Elements - Filters
-const searchInput = document.getElementById('searchInput');
-const fictionFilter = document.getElementById('fictionFilter');
-const genreFilter = document.getElementById('genreFilter');
-const difficultyFilter = document.getElementById('difficultyFilter');
-const statusFilter = document.getElementById('statusFilter');
-const formatCheckboxes = {
-  audible: document.getElementById('audibleFilter'),
-  kindle: document.getElementById('kindleFilter'),
-  physical: document.getElementById('physicalFilter')
-};
-
-// DOM Elements - Table
-const tbody = document.querySelector('#libraryTable tbody');
-const headerCells = document.querySelectorAll('#libraryTable thead th[data-field]');
-const countShownEl = document.getElementById('countShown');
-const countTotalEl = document.getElementById('countTotal');
-
-// DOM Elements - Detail Sheet
-const detailSheet = document.getElementById('detailSheet');
-const detailBackdrop = document.getElementById('detailBackdrop');
-const detailClose = document.getElementById('detailClose');
-const detailTitle = document.getElementById('detailTitle');
-const detailAuthor = document.getElementById('detailAuthor');
-const detailMeta = document.getElementById('detailMeta');
-const detailFormats = document.getElementById('detailFormats');
-const detailNotes = document.getElementById('detailNotes');
-const detailTags = document.getElementById('detailTags');
-
-// DOM Elements - Actions
-const addBookBtn = document.getElementById('addBookBtn');
-const amazonOpen = document.getElementById('amazonOpen');
-const amazonCopy = document.getElementById('amazonCopy');
-const editBookBtn = document.getElementById('editBookBtn');
-const deleteBookBtn = document.getElementById('deleteBookBtn');
-const importBtn = document.getElementById('importBtn');
-const exportBtn = document.getElementById('exportBtn');
-
-// DOM Elements - Add/Edit Modal
-const bookModal = document.getElementById('bookModal');
-const bookModalBackdrop = document.getElementById('bookModalBackdrop');
-const bookModalClose = document.getElementById('bookModalClose');
-const bookForm = document.getElementById('bookForm');
-const modalTitle = document.getElementById('modalTitle');
-const saveBookBtn = document.getElementById('saveBookBtn');
-
-// Initialize app
-function init() {
-  populateGenreFilter();
-  setupEventListeners();
-  applyFilters();
-}
-
-// Populate genre filter dropdown
-function populateGenreFilter() {
-  const genres = DataManager.getGenres();
-  genreFilter.innerHTML = '<option value="">All Genres</option>';
-  genres.forEach(genre => {
-    const option = document.createElement('option');
-    option.value = genre;
-    option.textContent = genre;
-    genreFilter.appendChild(option);
-  });
-}
-
-// Setup all event listeners
-function setupEventListeners() {
-  // Filter listeners
-  searchInput.addEventListener('input', applyFilters);
-  fictionFilter.addEventListener('change', applyFilters);
-  genreFilter.addEventListener('change', applyFilters);
-  difficultyFilter.addEventListener('change', applyFilters);
-  statusFilter.addEventListener('change', applyFilters);
-  
-  Object.values(formatCheckboxes).forEach(checkbox => {
-    checkbox.addEventListener('change', applyFilters);
-  });
-
-  // Sorting listeners
-  headerCells.forEach(th => {
-    th.addEventListener('click', handleSort);
-  });
-
-  // Detail sheet listeners
-  detailBackdrop.addEventListener('click', closeDetail);
-  detailClose.addEventListener('click', closeDetail);
-  amazonOpen.addEventListener('click', handleAmazonOpen);
-  amazonCopy.addEventListener('click', handleAmazonCopy);
-  editBookBtn.addEventListener('click', handleEditBook);
-  deleteBookBtn.addEventListener('click', handleDeleteBook);
-
-  // Modal listeners
-  addBookBtn.addEventListener('click', () => openBookModal());
-  bookModalBackdrop.addEventListener('click', closeBookModal);
-  bookModalClose.addEventListener('click', closeBookModal);
-  bookForm.addEventListener('submit', handleSaveBook);
-
-  // Import/Export listeners
-  importBtn.addEventListener('click', handleImport);
-  exportBtn.addEventListener('click', handleExport);
-
-  // Keyboard shortcuts
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (bookModal.classList.contains('open')) {
-        closeBookModal();
-      } else if (detailSheet.classList.contains('open')) {
-        closeDetail();
-      }
-    }
-  });
-}
-
-// Apply all filters and render
-function applyFilters() {
-  const books = DataManager.getBooks();
-  const term = searchInput.value.toLowerCase().trim();
-  const fictionVal = fictionFilter.value;
-  const genreVal = genreFilter.value;
-  const diffVal = difficultyFilter.value;
-  const statusVal = statusFilter.value;
-  
-  const wantAudible = formatCheckboxes.audible.checked;
-  const wantKindle = formatCheckboxes.kindle.checked;
-  const wantPhysical = formatCheckboxes.physical.checked;
-
-  let filtered = books.filter(book => {
-    // Search term
-    if (term) {
-      const searchable = [
-        book.title || '',
-        book.author || '',
-        book.genre || '',
-        book.notes || '',
-        book.fictionType || ''
-      ].join(' ').toLowerCase();
-      
-      if (!searchable.includes(term)) return false;
-    }
-
-    // Fiction/Nonfiction filter
-    if (fictionVal && book.fictionType !== fictionVal) return false;
-
-    // Genre filter
-    if (genreVal && book.genre !== genreVal) return false;
-
-    // Difficulty filter
-    if (diffVal && book.difficulty !== diffVal) return false;
-
-    // Status filter
-    if (statusVal && book.status !== statusVal) return false;
-
-    // Format filters
-    if (wantAudible && !book.formats.includes('audible')) return false;
-    if (wantKindle && !book.formats.includes('kindle')) return false;
-    if (wantPhysical && !book.formats.includes('physical')) return false;
-
-    return true;
-  });
-
-  // Apply sorting
-  if (sortField) {
-    filtered.sort((a, b) => {
-      let aVal = a[sortField] || '';
-      let bVal = b[sortField] || '';
-      
-      // Special handling for arrays (formats)
-      if (Array.isArray(aVal)) aVal = aVal.join(',');
-      if (Array.isArray(bVal)) bVal = bVal.join(',');
-      
-      aVal = aVal.toString().toLowerCase();
-      bVal = bVal.toString().toLowerCase();
-      
-      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }
-
-  renderBooks(filtered, books.length);
-}
-
-// Render books in table
-function renderBooks(books, totalCount) {
-  tbody.innerHTML = '';
-  
-  books.forEach(book => {
-    const tr = document.createElement('tr');
-    tr.dataset.bookId = book.id;
-
-    // Title
-    const titleTd = document.createElement('td');
-    titleTd.textContent = book.title || '';
-    tr.appendChild(titleTd);
-
-    // Author
-    const authorTd = document.createElement('td');
-    authorTd.textContent = book.author || '';
-    tr.appendChild(authorTd);
-
-    // Genre
-    const genreTd = document.createElement('td');
-    if (book.genre) {
-      const pill = document.createElement('span');
-      pill.className = 'pill';
-      pill.textContent = book.genre;
-      genreTd.appendChild(pill);
-    }
-    tr.appendChild(genreTd);
-
-    // Fiction/Nonfiction
-    const typeTd = document.createElement('td');
-    if (book.fictionType) {
-      const pill = document.createElement('span');
-      pill.className = 'pill ' + (book.fictionType === 'Fiction' ? 'fiction' : 'nonfiction');
-      pill.textContent = book.fictionType;
-      typeTd.appendChild(pill);
-    }
-    tr.appendChild(typeTd);
-
-    // Status
-    const statusTd = document.createElement('td');
-    if (book.status) {
-      const badge = document.createElement('span');
-      badge.className = 'badge ' + book.status.toLowerCase();
-      badge.textContent = book.status;
-      statusTd.appendChild(badge);
-    }
-    tr.appendChild(statusTd);
-
-    // Formats
-    const formatsTd = document.createElement('td');
-    if (book.formats && book.formats.length > 0) {
-      const formatText = book.formats.map(f => {
-        if (f === 'physical') return '📕';
-        if (f === 'kindle') return '📱';
-        if (f === 'audible') return '🎧';
-        return f;
-      }).join(' ');
-      formatsTd.textContent = formatText;
-    }
-    tr.appendChild(formatsTd);
-
-    // Click to open detail
-    tr.addEventListener('click', () => openDetail(book));
-
-    tbody.appendChild(tr);
-  });
-
-  // Update counts
-  countShownEl.textContent = books.length + ' shown';
-  countTotalEl.textContent = totalCount + ' total';
-}
-
-// Handle column sorting
-function handleSort(e) {
-  const th = e.currentTarget;
-  const field = th.getAttribute('data-field');
-  if (!field) return;
-
-  if (sortField === field) {
-    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-  } else {
-    sortField = field;
-    sortDir = 'asc';
-  }
-
-  // Update UI
-  headerCells.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
-  th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
-
-  applyFilters();
-}
-
-// Open detail sheet
-function openDetail(book) {
-  currentDetailBook = book;
-  
-  detailTitle.textContent = book.title || '';
-  detailAuthor.textContent = book.author ? 'by ' + book.author : '';
-
-  // Meta info
-  const metaBits = [];
-  if (book.fictionType) metaBits.push(book.fictionType);
-  if (book.genre) metaBits.push(book.genre);
-  if (book.difficulty) metaBits.push(book.difficulty + ' read');
-  if (book.acquiredDate) metaBits.push('Acquired: ' + book.acquiredDate);
-  detailMeta.textContent = metaBits.join(' • ');
-
-  // Formats
-  if (book.formats && book.formats.length > 0) {
-    const formatLabels = book.formats.map(f => {
-      return f.charAt(0).toUpperCase() + f.slice(1);
-    });
-    detailFormats.textContent = 'Formats: ' + formatLabels.join(', ');
-  } else {
-    detailFormats.textContent = 'Formats: —';
-  }
-
-  // Notes
-  if (book.notes) {
-    detailNotes.textContent = book.notes;
-    detailNotes.style.display = 'block';
-  } else {
-    detailNotes.style.display = 'none';
-  }
-
-  // Tags
-  detailTags.innerHTML = '';
-  const tags = [];
-  if (book.status) tags.push(book.status);
-  if (book.formats) tags.push(...book.formats);
-  
-  tags.forEach(tag => {
-    const span = document.createElement('span');
-    span.textContent = tag;
-    detailTags.appendChild(span);
-  });
-
-  detailSheet.classList.add('open');
-  detailSheet.setAttribute('aria-hidden', 'false');
-}
-
-// Close detail sheet
-function closeDetail() {
-  detailSheet.classList.remove('open');
-  detailSheet.setAttribute('aria-hidden', 'true');
-  currentDetailBook = null;
-}
-
-// Open Amazon page
-function handleAmazonOpen() {
-  if (!currentDetailBook) return;
-  const url = buildAmazonUrl(currentDetailBook);
-  window.open(url, '_blank');
-}
-
-// Copy Amazon link
-async function handleAmazonCopy() {
-  if (!currentDetailBook) return;
-  const url = buildAmazonUrl(currentDetailBook);
-  
-  try {
-    await navigator.clipboard.writeText(url);
-    showToast('Amazon link copied to clipboard!');
-  } catch (e) {
-    window.prompt('Copy this Amazon link:', url);
-  }
-}
-
-// Build Amazon search URL
-function buildAmazonUrl(book) {
-  const query = encodeURIComponent((book.title + ' ' + book.author).trim());
-  return 'https://www.amazon.com/s?k=' + query;
-}
-
-// Open book modal (add or edit)
-function openBookModal(book = null) {
-  if (book) {
-    // Edit mode
-    modalTitle.textContent = 'Edit Book';
-    document.getElementById('bookTitle').value = book.title || '';
-    document.getElementById('bookAuthor').value = book.author || '';
-    document.getElementById('bookGenre').value = book.genre || '';
-    document.getElementById('bookFictionType').value = book.fictionType || '';
-    document.getElementById('bookDifficulty').value = book.difficulty || '';
-    document.getElementById('bookStatus').value = book.status || '';
-    document.getElementById('bookNotes').value = book.notes || '';
-    document.getElementById('bookAcquiredDate').value = book.acquiredDate || '';
-    document.getElementById('bookISBN').value = book.isbn || '';
-    
-    // Formats
-    document.getElementById('formatPhysical').checked = book.formats.includes('physical');
-    document.getElementById('formatKindle').checked = book.formats.includes('kindle');
-    document.getElementById('formatAudible').checked = book.formats.includes('audible');
-    
-    bookForm.dataset.editId = book.id;
-  } else {
-    // Add mode
-    modalTitle.textContent = 'Add New Book';
-    bookForm.reset();
-    delete bookForm.dataset.editId;
-  }
-  
-  bookModal.classList.add('open');
-  bookModal.setAttribute('aria-hidden', 'false');
-  document.getElementById('bookTitle').focus();
-}
-
-// Close book modal
-function closeBookModal() {
-  bookModal.classList.remove('open');
-  bookModal.setAttribute('aria-hidden', 'true');
-  bookForm.reset();
-  delete bookForm.dataset.editId;
-}
-
-// Handle book form submission
-function handleSaveBook(e) {
-  e.preventDefault();
-  
-  const formats = [];
-  if (document.getElementById('formatPhysical').checked) formats.push('physical');
-  if (document.getElementById('formatKindle').checked) formats.push('kindle');
-  if (document.getElementById('formatAudible').checked) formats.push('audible');
-  
-  const bookData = {
-    title: document.getElementById('bookTitle').value.trim(),
-    author: document.getElementById('bookAuthor').value.trim(),
-    genre: document.getElementById('bookGenre').value.trim(),
-    fictionType: document.getElementById('bookFictionType').value,
-    difficulty: document.getElementById('bookDifficulty').value,
-    status: document.getElementById('bookStatus').value,
-    notes: document.getElementById('bookNotes').value.trim(),
-    acquiredDate: document.getElementById('bookAcquiredDate').value,
-    isbn: document.getElementById('bookISBN').value.trim(),
-    formats: formats,
-    coverUrl: ''
-  };
-  
-  const editId = bookForm.dataset.editId;
-  
-  if (editId) {
-    // Update existing book
-    DataManager.updateBook(editId, bookData);
-    showToast('Book updated successfully!');
-  } else {
-    // Add new book
-    DataManager.addBook(bookData);
-    showToast('Book added successfully!');
-  }
-  
-  closeBookModal();
-  populateGenreFilter(); // Refresh genres in case new one was added
-  applyFilters();
-}
-
-// Handle edit book button
-function handleEditBook() {
-  if (!currentDetailBook) return;
-  closeDetail();
-  openBookModal(currentDetailBook);
-}
-
-// Handle delete book button
-function handleDeleteBook() {
-  if (!currentDetailBook) return;
-  
-  if (confirm(`Are you sure you want to delete "${currentDetailBook.title}"?`)) {
-    DataManager.deleteBook(currentDetailBook.id);
-    showToast('Book deleted successfully!');
-    closeDetail();
-    applyFilters();
-  }
-}
-
-// Handle import
-function handleImport() {
-  const jsonInput = prompt(
-    'Paste your book data as JSON array:\n' +
-    'Format: [{"title":"Book","author":"Author","status":"unread","genre":"Fiction",...}]'
-  );
-  
-  if (!jsonInput) return;
-  
-  try {
-    const books = JSON.parse(jsonInput);
-    if (!Array.isArray(books)) {
-      alert('Invalid format. Please provide a JSON array.');
-      return;
-    }
-    
-    // Normalize the data to match our structure
-    const normalizedBooks = books.map(book => ({
-      title: book.title || book.Title || '',
-      author: book.author || book.Author || '',
-      status: book.status || book.Read_Status || 'unread',
-      genre: book.genre || book.Primary_Genre || '',
-      fictionType: book.fictionType || book.Fiction_Nonfiction || '',
-      difficulty: book.difficulty || book.Difficulty || '',
-      formats: book.formats || determineFormats(book),
-      notes: book.notes || book.Notes || '',
-      isbn: book.isbn || book.ISBN || '',
-      acquiredDate: book.acquiredDate || book.First_Acquired || book.addedAt || '',
-      publicationDate: book.publicationDate || '',
-      coverUrl: book.coverUrl || ''
-    }));
-    
-    const imported = DataManager.importBooks(normalizedBooks);
-    showToast(`Successfully imported ${imported} new book(s)!`);
-    populateGenreFilter();
-    applyFilters();
-  } catch (e) {
-    alert('Error parsing JSON: ' + e.message);
-  }
-}
-
-// Helper to determine formats from old data structure
-function determineFormats(book) {
-  const formats = [];
-  if (book.Has_Physical === 'checked' || book.format === 'physical' || book.formats?.includes('physical')) {
-    formats.push('physical');
-  }
-  if (book.Has_Kindle === 'checked' || book.format === 'kindle' || book.formats?.includes('kindle')) {
-    formats.push('kindle');
-  }
-  if (book.Has_Audible === 'checked' || book.format === 'audible' || book.formats?.includes('audible')) {
-    formats.push('audible');
-  }
-  if (formats.length === 0 && book.format) {
-    formats.push(book.format);
-  }
-  return formats;
-}
-
-// Handle export
-function handleExport() {
-  const books = DataManager.exportBooks();
-  const json = JSON.stringify(books, null, 2);
-  
-  // Create download
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'bookish-library-export-' + new Date().toISOString().split('T')[0] + '.json';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  
-  showToast('Library exported successfully!');
-}
-
-// Show toast notification
-function showToast(message) {
-  const toast = document.getElementById('toast');
-  const toastMessage = document.getElementById('toastMessage');
-  
-  toastMessage.textContent = message;
-  toast.classList.add('show');
-  
-  setTimeout(() => {
-    toast.classList.remove('show');
-  }, 3000);
-}
-
-// Initialize app when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
+[
+{"title":"Sins of the House of Borgia","author":"Sarah Bower","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-03-28","publicationDate":"","coverUrl":""},
+{"title":"Extremely Loud and Incredibly Close","author":"Jonathan Safran Foer","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-03-28","publicationDate":"","coverUrl":""},
+{"title":"Dracula","author":"Bram Stoker","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-03-31","publicationDate":"","coverUrl":""},
+{"title":"Father Junipero Serra","author":"Ivy May Bolton","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-04-07","publicationDate":"","coverUrl":""},
+{"title":"The Feast of the Goat","author":"Mario Vargas Llosa","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-04-15","publicationDate":"","coverUrl":""},
+{"title":"Fire Monks","author":"Colleen Morton Busch","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-06-12","publicationDate":"","coverUrl":""},
+{"title":"Abraham Lincoln: Vampire Hunter","author":"Seth Grahame-Smith","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-07-18","publicationDate":"","coverUrl":""},
+{"title":"Bali: Sekala & Niskala","author":"Fred B. Eiseman","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-07-18","publicationDate":"","coverUrl":""},
+{"title":"Destiny of the Republic","author":"Candice Millard","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-09-06","publicationDate":"","coverUrl":""},
+{"title":"Team of Rivals","author":"Doris Kearns Goodwin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2012-11-09","publicationDate":"","coverUrl":""},
+{"title":"John Muir Trail","author":"Elizabeth Wenk","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2013-02-14","publicationDate":"","coverUrl":""},
+{"title":"The Mongoliad","author":"G. Bear; N. Stephenson et al.; Greg Bear; Neal Stephenson; Mark Teppo; Erik Bear; Joseph Brassey; Cooper Moo; Nicole Galland","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2013-03-31","publicationDate":"","coverUrl":""},
+{"title":"The Mongoliad (Book 2)","author":"G. Bear; N. Stephenson et al.","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2013-03-31","publicationDate":"","coverUrl":""},
+{"title":"The Forever War","author":"Joe Haldeman","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2013-04-03","publicationDate":"","coverUrl":""},
+{"title":"High Lonesome","author":"Joyce Carol Oates","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2013-04-13","publicationDate":"","coverUrl":""},
+{"title":"The Practice of Management","author":"Peter Drucker; Peter F. Drucker","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2013-06-23","publicationDate":"","coverUrl":""},
+{"title":"Nexus","author":"Ramez Naam; Yuval Noah Harari","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible","kindle","physical"],"notes":"","isbn":"","acquiredDate":"2013-06-26","publicationDate":"","coverUrl":""},
+{"title":"Gone Girl","author":"Gillian Flynn","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2013-09-23","publicationDate":"","coverUrl":""},
+{"title":"On the Nature of Things","author":"Lucretius; Lucretius; Martin Ferguson Smith","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2013-10-29","publicationDate":"","coverUrl":""},
+{"title":"Buddhism for Busy People","author":"David Michie","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2013-11-26","publicationDate":"","coverUrl":""},
+{"title":"Junipero Serra","author":"Steven W. Hackel","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2013-11-26","publicationDate":"","coverUrl":""},
+{"title":"Junípero Serra","author":"Steven W. Hackel","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2013-11-26","publicationDate":"","coverUrl":""},
+{"title":"The Innovator's Dilemma","author":"Clayton Christensen","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2014-01-21","publicationDate":"","coverUrl":""},
+{"title":"The Innovator's Dilemma","author":"Clayton M. Christensen","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2014-01-21","publicationDate":"","coverUrl":""},
+{"title":"The Everything Store","author":"Brad Stone","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-03-10","publicationDate":"","coverUrl":""},
+{"title":"The Hard Thing About Hard Things","author":"Ben Horowitz","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-03-27","publicationDate":"","coverUrl":""},
+{"title":"Living with a Wild God","author":"Barbara Ehrenreich","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-04-23","publicationDate":"","coverUrl":""},
+{"title":"Annihilation","author":"Jeff VanderMeer","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-06-01","publicationDate":"","coverUrl":""},
+{"title":"Authority","author":"Jeff VanderMeer","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-06-12","publicationDate":"","coverUrl":""},
+{"title":"Green Hills of Africa","author":"Ernest Hemingway","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-06-17","publicationDate":"","coverUrl":""},
+{"title":"A Farewell to Arms","author":"Ernest Hemingway","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-06-17","publicationDate":"","coverUrl":""},
+{"title":"A History of the East African Coast","author":"Charles Cornelius","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-06-17","publicationDate":"","coverUrl":""},
+{"title":"Out of Africa","author":"Isak Dinesen","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-06-30","publicationDate":"","coverUrl":""},
+{"title":"Mind and Cosmos","author":"Thomas Nagel","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-07-22","publicationDate":"","coverUrl":""},
+{"title":"Capital in the Twenty-First Century","author":"Thomas Piketty","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-08-03","publicationDate":"","coverUrl":""},
+{"title":"Acceptance","author":"Jeff VanderMeer","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-08-25","publicationDate":"","coverUrl":""},
+{"title":"Prague in Danger","author":"Peter Demetz","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2014-09-01","publicationDate":"","coverUrl":""},
+{"title":"Absolute Recoil","author":"Slavoj Žižek","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-09-03","publicationDate":"","coverUrl":""},
+{"title":"The Peripheral","author":"William Gibson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-10-29","publicationDate":"","coverUrl":""},
+{"title":"The Meaning of Human Existence","author":"Edward O. Wilson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2014-10-30","publicationDate":"","coverUrl":""},
+{"title":"Zero History","author":"William Gibson","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2015-01-13","publicationDate":"","coverUrl":""},
+{"title":"Colorless Tsukuru Tazaki and His Years of Pilgrimage","author":"Haruki Murakami","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2015-01-24","publicationDate":"","coverUrl":""},
+{"title":"Colorless Tsukuru Tazaki","author":"Haruki Murakami","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2015-01-24","publicationDate":"","coverUrl":""},
+{"title":"Master and Commander","author":"Patrick O'Brian; Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible","kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-01-24","publicationDate":"","coverUrl":""},
+{"title":"The Buried Giant","author":"Kazuo Ishiguro","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-03-04","publicationDate":"","coverUrl":""},
+{"title":"The Advantage","author":"Patrick Lencioni; Patrick M. Lencioni","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-03-04","publicationDate":"","coverUrl":""},
+{"title":"The Unconsoled","author":"Kazuo Ishiguro","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-03-21","publicationDate":"","coverUrl":""},
+{"title":"The History of the Decline and Fall of the Roman Empire","author":"Edward Gibbon","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2015-03-23","publicationDate":"","coverUrl":""},
+{"title":"The Decline and Fall of the Roman Empire","author":"Edward Gibbon","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2015-03-23","publicationDate":"","coverUrl":""},
+{"title":"The Great Gatsby","author":"F. Scott Fitzgerald","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-03-29","publicationDate":"","coverUrl":""},
+{"title":"White Noise","author":"Don DeLillo","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-05-05","publicationDate":"","coverUrl":""},
+{"title":"After Dark","author":"Haruki Murakami","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-06-09","publicationDate":"","coverUrl":""},
+{"title":"Inferno","author":"Dan Brown","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-07-06","publicationDate":"","coverUrl":""},
+{"title":"Seveneves","author":"Neal Stephenson","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-07-06","publicationDate":"","coverUrl":""},
+{"title":"The Festival of Insignificance","author":"Milan Kundera","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2015-07-12","publicationDate":"","coverUrl":""},
+{"title":"Cracking the GRE","author":"Princeton Review","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2015-09-09","publicationDate":"","coverUrl":""},
+{"title":"The Price of Privilege","author":"Madeline Levine","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2015-09-09","publicationDate":"","coverUrl":""},
+{"title":"Doing School","author":"Denise Clark Pope","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2015-09-09","publicationDate":"","coverUrl":""},
+{"title":"The Wake","author":"Paul Kingsnorth","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-09-22","publicationDate":"","coverUrl":""},
+{"title":"The Bone Clocks","author":"David Mitchell","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-09-23","publicationDate":"","coverUrl":""},
+{"title":"Otherland: City of Golden Shadow","author":"Tad Williams","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-10-21","publicationDate":"","coverUrl":""},
+{"title":"The Adventures of Augie March","author":"Saul Bellow","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-11-14","publicationDate":"","coverUrl":""},
+{"title":"The Three-Body Problem","author":"Cixin Liu","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2015-11-25","publicationDate":"","coverUrl":""},
+{"title":"The Dark Forest","author":"Cixin Liu","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-12-10","publicationDate":"","coverUrl":""},
+{"title":"Infinite Jest","author":"David Foster Wallace","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2015-12-27","publicationDate":"","coverUrl":""},
+{"title":"Season of the Witch","author":"David Talbot","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-01-04","publicationDate":"","coverUrl":""},
+{"title":"The Stone Reader","author":"Peter Catapano; Simon Critchley","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-02-10","publicationDate":"","coverUrl":""},
+{"title":"The Book of Laughter and Forgetting","author":"Milan Kundera","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2016-03-26","publicationDate":"","coverUrl":""},
+{"title":"A Question of Upbringing","author":"Anthony Powell","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-03-27","publicationDate":"","coverUrl":""},
+{"title":"Family Life","author":"Akhil Sharma","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-04-19","publicationDate":"","coverUrl":""},
+{"title":"Satin Island","author":"Tom McCarthy","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-04-27","publicationDate":"","coverUrl":""},
+{"title":"The Spectator Bird","author":"Wallace Stegner","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-05-02","publicationDate":"","coverUrl":""},
+{"title":"The Goldfinch","author":"Donna Tartt","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-05-25","publicationDate":"","coverUrl":""},
+{"title":"The Big Picture","author":"Sean Carroll; Sean M. Carroll","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-06-12","publicationDate":"","coverUrl":""},
+{"title":"Religion for Atheists","author":"Alain de Botton","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2016-06-24","publicationDate":"","coverUrl":""},
+{"title":"The News","author":"Alain de Botton","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2016-06-24","publicationDate":"","coverUrl":""},
+{"title":"The Man in the High Castle","author":"Philip K. Dick","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible","kindle"],"notes":"","isbn":"","acquiredDate":"2016-07-17","publicationDate":"","coverUrl":""},
+{"title":"Death's End","author":"Cixin Liu","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2016-07-20","publicationDate":"","coverUrl":""},
+{"title":"The Passage","author":"Justin Cronin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-07-25","publicationDate":"","coverUrl":""},
+{"title":"Angle of Repose","author":"Wallace Stegner","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-07-25","publicationDate":"","coverUrl":""},
+{"title":"The Twelve","author":"Justin Cronin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-08-16","publicationDate":"","coverUrl":""},
+{"title":"What Got You Here Won't Get You There","author":"Marshall Goldsmith; Mark Reiter","status":"unread","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2016-08-16","publicationDate":"","coverUrl":""},
+{"title":"What Got You Here Won't Get You There","author":"Marshall Goldsmith","status":"unread","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2016-08-16","publicationDate":"","coverUrl":""},
+{"title":"The Order of Things","author":"Michel Foucault","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-08-16","publicationDate":"","coverUrl":""},
+{"title":"Death's End","author":"Cixin Liu","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2016-09-19","publicationDate":"","coverUrl":""},
+{"title":"Introducing NLP","author":"Joseph O'Connor; John Seymour","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2016-10-11","publicationDate":"","coverUrl":""},
+{"title":"The Structure of Magic Vol 1","author":"Richard Bandler; John Grinder","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2016-10-24","publicationDate":"","coverUrl":""},
+{"title":"Co-Active Coaching","author":"Henry Kimsey-House; Karen Kimsey-House; Phillip Sandahl; Laura Whitworth; Kimsey-House et al.","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-10-25","publicationDate":"","coverUrl":""},
+{"title":"A Supposedly Fun Thing I'll Never Do Again","author":"David Foster Wallace","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-11-11","publicationDate":"","coverUrl":""},
+{"title":"Shantaram","author":"Gregory David Roberts","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2016-11-28","publicationDate":"","coverUrl":""},
+{"title":"On What Matters","author":"Derek Parfit","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-01-03","publicationDate":"","coverUrl":""},
+{"title":"On What Matters (Vol 1)","author":"Derek Parfit","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2017-01-03","publicationDate":"","coverUrl":""},
+{"title":"On Art and Mindfulness","author":"Matthew Fox","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-01-20","publicationDate":"","coverUrl":""},
+{"title":"Imperium","author":"Robert Harris","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2017-01-27","publicationDate":"","coverUrl":""},
+{"title":"Hillbilly Elegy","author":"J. D. Vance; J.D. Vance","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2017-03-31","publicationDate":"","coverUrl":""},
+{"title":"The Genius Decision","author":"Hunter M. Adams","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-04-06","publicationDate":"","coverUrl":""},
+{"title":"The E-Myth Revisited","author":"Michael Gerber","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-07-13","publicationDate":"","coverUrl":""},
+{"title":"Leading Change","author":"John Kotter; John P. Kotter","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2017-07-13","publicationDate":"","coverUrl":""},
+{"title":"Time Travel","author":"James Gleick","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-09-12","publicationDate":"","coverUrl":""},
+{"title":"The Open Society and its Enemies (Vol 1)","author":"Karl Popper","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-09-12","publicationDate":"","coverUrl":""},
+{"title":"HBR 10 Must Reads on Change Management","author":"Various","status":"unread","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-10-13","publicationDate":"","coverUrl":""},
+{"title":"Sapiens","author":"Yuval Noah Harari","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-10-17","publicationDate":"","coverUrl":""},
+{"title":"American War","author":"Omar El Akkad","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-11-24","publicationDate":"","coverUrl":""},
+{"title":"Hacienda Style","author":"Karen Witynski","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-11-28","publicationDate":"","coverUrl":""},
+{"title":"Principles: Life and Work","author":"Ray Dalio","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-12-19","publicationDate":"","coverUrl":""},
+{"title":"Let My People Go Surfing","author":"Yvon Chouinard","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-12-22","publicationDate":"","coverUrl":""},
+{"title":"The Connected Company","author":"Dave Gray; Thomas Vander Wal","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2017-12-26","publicationDate":"","coverUrl":""},
+{"title":"Homo Deus","author":"Yuval Noah Harari","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-02-14","publicationDate":"","coverUrl":""},
+{"title":"The Order of Time","author":"Carlo Rovelli","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-06-25","publicationDate":"","coverUrl":""},
+{"title":"Measure What Matters","author":"John Doerr","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-07-02","publicationDate":"","coverUrl":""},
+{"title":"An Officer and a Spy","author":"Robert Harris","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-07-31","publicationDate":"","coverUrl":""},
+{"title":"Fatherland","author":"Robert Harris","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-08-02","publicationDate":"","coverUrl":""},
+{"title":"Munich","author":"Robert Harris","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-08-02","publicationDate":"","coverUrl":""},
+{"title":"Down to Earth","author":"Bruno Latour","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-10-25","publicationDate":"","coverUrl":""},
+{"title":"Reality Is Not What It Seems","author":"Carlo Rovelli","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2018-11-02","publicationDate":"","coverUrl":""},
+{"title":"The Lime Works","author":"Thomas Bernhard","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-11-07","publicationDate":"","coverUrl":""},
+{"title":"Brave New World","author":"Aldous Huxley","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2018-11-10","publicationDate":"","coverUrl":""},
+{"title":"Who: The A Method for Hiring","author":"Geoff Smart; Randy Street","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-11-15","publicationDate":"","coverUrl":""},
+{"title":"The Neighborhood","author":"Luis Alberto Urrea","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-11-20","publicationDate":"","coverUrl":""},
+{"title":"The Jungle Grows Back","author":"Robert Kagan","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2018-11-27","publicationDate":"","coverUrl":""},
+{"title":"How to Change Your Mind","author":"Michael Pollan","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2018-11-30","publicationDate":"","coverUrl":""},
+{"title":"Border Districts","author":"Gerald Murnane","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2018-12-21","publicationDate":"","coverUrl":""},
+{"title":"Never Split the Difference","author":"Chris Voss","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-01-01","publicationDate":"","coverUrl":""},
+{"title":"Ball Lightning","author":"Cixin Liu","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-01-08","publicationDate":"","coverUrl":""},
+{"title":"The Gallic Wars","author":"Julius Caesar","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-01-17","publicationDate":"","coverUrl":""},
+{"title":"Bad Blood","author":"John Carreyrou","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-02-04","publicationDate":"","coverUrl":""},
+{"title":"An End to Upside Down Thinking","author":"Mark Gober","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-02-04","publicationDate":"","coverUrl":""},
+{"title":"The Kingfisher Secret","author":"Anonymous","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2019-02-06","publicationDate":"","coverUrl":""},
+{"title":"A Wizard of Earthsea","author":"Ursula K. Le Guin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-02-19","publicationDate":"","coverUrl":""},
+{"title":"All Systems Red","author":"Martha Wells","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-02-19","publicationDate":"","coverUrl":""},
+{"title":"The Tombs of Atuan","author":"Ursula K. Le Guin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-02-26","publicationDate":"","coverUrl":""},
+{"title":"The Farthest Shore","author":"Ursula K. Le Guin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-03-03","publicationDate":"","coverUrl":""},
+{"title":"The Uninhabitable Earth","author":"David Wallace-Wells","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-03-20","publicationDate":"","coverUrl":""},
+{"title":"The Sovereign Individual","author":"James Dale Davidson; William Rees-Mogg","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2019-03-22","publicationDate":"","coverUrl":""},
+{"title":"The Lessons of History","author":"Will Durant; Ariel Durant","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["audible","physical"],"notes":"","isbn":"","acquiredDate":"2019-04-01","publicationDate":"","coverUrl":""},
+{"title":"Alexander the Great","author":"Philip Freeman","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-04-18","publicationDate":"","coverUrl":""},
+{"title":"A Portrait of the Artist as a Young Man","author":"James Joyce","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-05-19","publicationDate":"","coverUrl":""},
+{"title":"Trillion Dollar Coach","author":"Eric Schmidt; Jonathan Rosenberg; Alan Eagle","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible","physical"],"notes":"","isbn":"","acquiredDate":"2019-05-22","publicationDate":"","coverUrl":""},
+{"title":"Product-Led Growth","author":"Wes Bush","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2019-06-02","publicationDate":"","coverUrl":""},
+{"title":"Post Captain","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-07-19","publicationDate":"","coverUrl":""},
+{"title":"Conscious","author":"Annaka Harris","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-07-19","publicationDate":"","coverUrl":""},
+{"title":"Avogadro Corp","author":"William Hertling","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-09-04","publicationDate":"","coverUrl":""},
+{"title":"The Testaments","author":"Margaret Atwood","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-09-18","publicationDate":"","coverUrl":""},
+{"title":"H.M.S. Surprise","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-10-14","publicationDate":"","coverUrl":""},
+{"title":"The Mauritius Command","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-10-30","publicationDate":"","coverUrl":""},
+{"title":"Desolation Island","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-11-11","publicationDate":"","coverUrl":""},
+{"title":"The Fortune of War","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-11-19","publicationDate":"","coverUrl":""},
+{"title":"Superintelligence","author":"Nick Bostrom","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2019-11-21","publicationDate":"","coverUrl":""},
+{"title":"Reasons and Persons","author":"Derek Parfit","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2019-11-21","publicationDate":"","coverUrl":""},
+{"title":"The Surgeon's Mate","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-12-02","publicationDate":"","coverUrl":""},
+{"title":"The Ionian Mission","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-12-10","publicationDate":"","coverUrl":""},
+{"title":"Treason's Harbour","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2019-12-19","publicationDate":"","coverUrl":""},
+{"title":"The Far Side of the World","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-01-06","publicationDate":"","coverUrl":""},
+{"title":"The Reverse of the Medal","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-01-15","publicationDate":"","coverUrl":""},
+{"title":"Sacre Bleu","author":"Christopher Moore","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2020-01-18","publicationDate":"","coverUrl":""},
+{"title":"The Letter of Marque","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-01-22","publicationDate":"","coverUrl":""},
+{"title":"The Thirteen-Gun Salute","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-01-28","publicationDate":"","coverUrl":""},
+{"title":"The Nutmeg of Consolation","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-02-04","publicationDate":"","coverUrl":""},
+{"title":"The Truelove","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-02-10","publicationDate":"","coverUrl":""},
+{"title":"The Wine-Dark Sea","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-02-23","publicationDate":"","coverUrl":""},
+{"title":"Leviathan Wakes","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-02-26","publicationDate":"","coverUrl":""},
+{"title":"The Commodore","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-03-02","publicationDate":"","coverUrl":""},
+{"title":"The Yellow Admiral","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-03-20","publicationDate":"","coverUrl":""},
+{"title":"The Hundred Days","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-04-15","publicationDate":"","coverUrl":""},
+{"title":"Burr","author":"Gore Vidal","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-06-12","publicationDate":"","coverUrl":""},
+{"title":"Beloved","author":"Toni Morrison","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-06-14","publicationDate":"","coverUrl":""},
+{"title":"Snow","author":"John Banville","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2020-10-07","publicationDate":"","coverUrl":""},
+{"title":"Wolf Hall","author":"Hilary Mantel","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2020-11-20","publicationDate":"","coverUrl":""},
+{"title":"Leaving the Atocha Station","author":"Ben Lerner","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2020-11-21","publicationDate":"","coverUrl":""},
+{"title":"Post Corona","author":"Scott Galloway","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2020-12-04","publicationDate":"","coverUrl":""},
+{"title":"A Woman of No Importance","author":"Sonia Purnell","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2020-12-17","publicationDate":"","coverUrl":""},
+{"title":"Mortal Questions","author":"Thomas Nagel","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2020-12-22","publicationDate":"","coverUrl":""},
+{"title":"Bring Up the Bodies","author":"Hilary Mantel","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2020-12-26","publicationDate":"","coverUrl":""},
+{"title":"Caliban's War","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-01-05","publicationDate":"","coverUrl":""},
+{"title":"Forty Signs of Rain","author":"Kim Stanley Robinson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-01-25","publicationDate":"","coverUrl":""},
+{"title":"Abaddon's Gate","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-01-25","publicationDate":"","coverUrl":""},
+{"title":"On Having No Head","author":"Douglas Harding","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2021-01-27","publicationDate":"","coverUrl":""},
+{"title":"Cibola Burn","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-02-09","publicationDate":"","coverUrl":""},
+{"title":"Nemesis Games","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-02-21","publicationDate":"","coverUrl":""},
+{"title":"The Sympathizer","author":"Viet Thanh Nguyen","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2021-02-28","publicationDate":"","coverUrl":""},
+{"title":"Klara and the Sun","author":"Kazuo Ishiguro","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2021-03-01","publicationDate":"","coverUrl":""},
+{"title":"The Mirror & the Light","author":"Hilary Mantel","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible","physical"],"notes":"","isbn":"","acquiredDate":"2021-03-05","publicationDate":"","coverUrl":""},
+{"title":"Tiamat's Wrath","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-03-08","publicationDate":"","coverUrl":""},
+{"title":"Persepolis Rising","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-03-08","publicationDate":"","coverUrl":""},
+{"title":"Babylon's Ashes","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-03-08","publicationDate":"","coverUrl":""},
+{"title":"The Left Hand of Darkness","author":"Ursula K. Le Guin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-04-19","publicationDate":"","coverUrl":""},
+{"title":"The Dispossessed","author":"Ursula K. Le Guin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-04-24","publicationDate":"","coverUrl":""},
+{"title":"2034","author":"Elliot Ackerman; James Stavridis","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-04-28","publicationDate":"","coverUrl":""},
+{"title":"12 Rules for Life","author":"Jordan B. Peterson","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-05-20","publicationDate":"","coverUrl":""},
+{"title":"How Democracies Die","author":"Steven Levitsky; Daniel Ziblatt","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2021-06-01","publicationDate":"","coverUrl":""},
+{"title":"The Overstory","author":"Richard Powers","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible","kindle","physical"],"notes":"","isbn":"","acquiredDate":"2021-06-06","publicationDate":"","coverUrl":""},
+{"title":"21 Lessons for the 21st Century","author":"Yuval Noah Harari","status":"unread","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2021-06-23","publicationDate":"","coverUrl":""},
+{"title":"This Is Your Mind on Plants","author":"Michael Pollan","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-07-11","publicationDate":"","coverUrl":""},
+{"title":"Children of Time","author":"Adrian Tchaikovsky","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-07-20","publicationDate":"","coverUrl":""},
+{"title":"Consolations","author":"David Whyte","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2021-07-30","publicationDate":"","coverUrl":""},
+{"title":"Freedom","author":"Jonathan Franzen","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2021-08-22","publicationDate":"","coverUrl":""},
+{"title":"Blue at the Mizzen","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-09-03","publicationDate":"","coverUrl":""},
+{"title":"Big White Ghetto","author":"Kevin D. Williamson; Kevin Williamson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2021-09-10","publicationDate":"","coverUrl":""},
+{"title":"Foundation","author":"Isaac Asimov","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-09-24","publicationDate":"","coverUrl":""},
+{"title":"Foundation and Empire","author":"Isaac Asimov","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-09-30","publicationDate":"","coverUrl":""},
+{"title":"Second Foundation","author":"Isaac Asimov","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-10-09","publicationDate":"","coverUrl":""},
+{"title":"Dune","author":"Frank Herbert","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2021-11-15","publicationDate":"","coverUrl":""},
+{"title":"Dune Messiah","author":"Frank Herbert","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2021-11-19","publicationDate":"","coverUrl":""},
+{"title":"The Sweet Spot","author":"Paul Bloom","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-11-23","publicationDate":"","coverUrl":""},
+{"title":"Principles for Dealing with the Changing World Order","author":"Ray Dalio","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2021-12-01","publicationDate":"","coverUrl":""},
+{"title":"The Ministry for the Future","author":"Kim Stanley Robinson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2021-12-24","publicationDate":"","coverUrl":""},
+{"title":"Virtual Light","author":"William Gibson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2022-01-04","publicationDate":"","coverUrl":""},
+{"title":"Total Freedom: The Essential Krishnamurti","author":"J. Krishnamurti","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2022-01-11","publicationDate":"","coverUrl":""},
+{"title":"J Krishnamurti Commentaries On Living Series 2","author":"J Krishnamurti; J. Krishnamurti","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2022-01-11","publicationDate":"","coverUrl":""},
+{"title":"Termination Shock","author":"Neal Stephenson","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-01-12","publicationDate":"","coverUrl":""},
+{"title":"Zone to Win","author":"Geoffrey A. Moore","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2022-01-27","publicationDate":"","coverUrl":""},
+{"title":"Shards of Earth","author":"Adrian Tchaikovsky","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-02-07","publicationDate":"","coverUrl":""},
+{"title":"The First Man in Rome","author":"Colleen McCullough","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-02-17","publicationDate":"","coverUrl":""},
+{"title":"The Pillars of the Earth","author":"Ken Follett","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-03-18","publicationDate":"","coverUrl":""},
+{"title":"Shogun","author":"James Clavell","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-04-21","publicationDate":"","coverUrl":""},
+{"title":"World Without End","author":"Ken Follett","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-04-21","publicationDate":"","coverUrl":""},
+{"title":"Tai-Pan","author":"James Clavell","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-05-19","publicationDate":"","coverUrl":""},
+{"title":"Gai-Jin","author":"James Clavell","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-06-05","publicationDate":"","coverUrl":""},
+{"title":"Golf My Way","author":"Jack Nicklaus","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2022-07-14","publicationDate":"","coverUrl":""},
+{"title":"The High Sierra","author":"Kim Stanley Robinson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-07-22","publicationDate":"","coverUrl":""},
+{"title":"The High Sierra: A Love Story","author":"Kim Stanley Robinson","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2022-07-28","publicationDate":"","coverUrl":""},
+{"title":"The Back Country","author":"Gary Snyder","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2022-07-28","publicationDate":"","coverUrl":""},
+{"title":"The Gates of Athens","author":"Conn Iggulden","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2022-09-12","publicationDate":"","coverUrl":""},
+{"title":"How the World Really Works","author":"Vaclav Smil","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible","kindle","physical"],"notes":"","isbn":"","acquiredDate":"2022-09-12","publicationDate":"","coverUrl":""},
+{"title":"A Column of Fire","author":"Ken Follett","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-10-06","publicationDate":"","coverUrl":""},
+{"title":"The Passenger","author":"Cormac McCarthy","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible","kindle","physical"],"notes":"","isbn":"","acquiredDate":"2022-10-26","publicationDate":"","coverUrl":""},
+{"title":"Stella Maris","author":"Cormac McCarthy","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2022-12-06","publicationDate":"","coverUrl":""},
+{"title":"Fully Automated Luxury Communism","author":"Aaron Bastani","status":"read","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2022-12-23","publicationDate":"","coverUrl":""},
+{"title":"The Long Con: A Novel","author":"Michael Gruber","status":"unread","genre":"","fictionType":"Fiction","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2023-01-23","publicationDate":"","coverUrl":""},
+{"title":"The Long Con","author":"Michael Gruber","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2023-01-23","publicationDate":"","coverUrl":""},
+{"title":"Fundamentals","author":"Frank Wilczek","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-01-27","publicationDate":"","coverUrl":""},
+{"title":"All the Pretty Horses","author":"Cormac McCarthy","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-02-01","publicationDate":"","coverUrl":""},
+{"title":"The Passenger Box Set","author":"Cormac McCarthy","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2023-02-03","publicationDate":"","coverUrl":""},
+{"title":"Gerhard Richter: Painting After the Subject of History","author":"David Anfam","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2023-02-07","publicationDate":"","coverUrl":""},
+{"title":"Leviathan Falls","author":"James S.A. Corey","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-02-09","publicationDate":"","coverUrl":""},
+{"title":"The Creative Act","author":"Rick Rubin","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-02-15","publicationDate":"","coverUrl":""},
+{"title":"The Remains of the Day","author":"Kazuo Ishiguro","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-03-29","publicationDate":"","coverUrl":""},
+{"title":"The Unknown Shore","author":"Patrick O'Brian","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-04-13","publicationDate":"","coverUrl":""},
+{"title":"The Wager","author":"David Grann","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-04-20","publicationDate":"","coverUrl":""},
+{"title":"Nothing Like It in the World","author":"Stephen E. Ambrose","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2023-05-18","publicationDate":"","coverUrl":""},
+{"title":"Zero-Sum: Stories","author":"Joyce Carol Oates","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["kindle","physical"],"notes":"","isbn":"","acquiredDate":"2023-07-17","publicationDate":"","coverUrl":""},
+{"title":"A Man in Love","author":"Karl Ove Knausgaard","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-07-28","publicationDate":"","coverUrl":""},
+{"title":"Pax","author":"Tom Holland","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-09-26","publicationDate":"","coverUrl":""},
+{"title":"Rubicon","author":"Tom Holland","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-10-31","publicationDate":"","coverUrl":""},
+{"title":"The Alchemist","author":"Paulo Coelho","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-11-10","publicationDate":"","coverUrl":""},
+{"title":"Gilead","author":"Marilynne Robinson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2023-11-29","publicationDate":"","coverUrl":""},
+{"title":"Oryx and Crake","author":"Margaret Atwood","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2023-12-24","publicationDate":"","coverUrl":""},
+{"title":"The Year of the Flood","author":"Margaret Atwood","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-01-02","publicationDate":"","coverUrl":""},
+{"title":"You Dreamed of Empires","author":"Álvaro Enrigue","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2024-01-12","publicationDate":"","coverUrl":""},
+{"title":"Palo Alto: A History of California Capitalism ","author":"Malcolm Harris","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["kindle"],"notes":"","isbn":"","acquiredDate":"2024-01-16","publicationDate":"","coverUrl":""},
+{"title":"HBR's 10 Must Reads on AI","author":"Various","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2024-01-16","publicationDate":"","coverUrl":""},
+{"title":"Palo Alto","author":"Malcolm Harris","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2024-01-16","publicationDate":"","coverUrl":""},
+{"title":"Free Agents","author":"Kevin J. Mitchell","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-02-14","publicationDate":"","coverUrl":""},
+{"title":"Fall; or Dodge in Hell","author":"Neal Stephenson","status":"read","genre":"Science Fiction","fictionType":"Fiction","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-02-27","publicationDate":"","coverUrl":""},
+{"title":"Determined","author":"Robert M. Sapolsky","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-03-23","publicationDate":"","coverUrl":""},
+{"title":"Consider Phlebas","author":"Iain M. Banks","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-04-04","publicationDate":"","coverUrl":""},
+{"title":"The Player of Games","author":"Iain M. Banks","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-04-20","publicationDate":"","coverUrl":""},
+{"title":"Use of Weapons","author":"Iain M. Banks","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-05-28","publicationDate":"","coverUrl":""},
+{"title":"The State of the Art","author":"Iain M. Banks","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-06-29","publicationDate":"","coverUrl":""},
+{"title":"The Corrections","author":"Jonathan Franzen","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-07-12","publicationDate":"","coverUrl":""},
+{"title":"Pattern Breakers: Why Some Start-Ups Change the Future","author":"Jeffrey Funk","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2024-08-08","publicationDate":"","coverUrl":""},
+{"title":"Matter","author":"Iain M. Banks","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-08-27","publicationDate":"","coverUrl":""},
+{"title":"In Ascension","author":"Martin MacInnes","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-09-03","publicationDate":"","coverUrl":""},
+{"title":"The Vegetarian","author":"Han Kang","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-10-11","publicationDate":"","coverUrl":""},
+{"title":"The Ministry of Time","author":"Kaliane Bradley","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-10-31","publicationDate":"","coverUrl":""},
+{"title":"On Trails","author":"Robert Moor","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2024-11-01","publicationDate":"","coverUrl":""},
+{"title":"Braiding Sweetgrass","author":"Robin Wall Kimmerer","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-11-19","publicationDate":"","coverUrl":""},
+{"title":"The Power Law","author":"Sebastian Mallaby","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2024-11-26","publicationDate":"","coverUrl":""},
+{"title":"Stories of Your Life and Others","author":"Ted Chiang","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2024-12-17","publicationDate":"","coverUrl":""},
+{"title":"The Hydrogen Sonata","author":"Iain M. Banks","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2024-12-19","publicationDate":"","coverUrl":""},
+{"title":"The Anxious Generation","author":"Jonathan Haidt","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2025-01-13","publicationDate":"","coverUrl":""},
+{"title":"The City and Its Uncertain Walls","author":"Haruki Murakami","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-02-14","publicationDate":"","coverUrl":""},
+{"title":"Democracy in America","author":"Alexis de Tocqueville; Harvey Mansfield (trans.)","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2025-04-25","publicationDate":"","coverUrl":""},
+{"title":"Eyes of the Void","author":"Adrian Tchaikovsky","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-04-26","publicationDate":"","coverUrl":""},
+{"title":"AI Engineering","author":"Chip Huyen","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2025-05-20","publicationDate":"","coverUrl":""},
+{"title":"Until the End of Time","author":"Brian Greene","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-05-20","publicationDate":"","coverUrl":""},
+{"title":"The Untethered Soul","author":"Michael A. Singer","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-05-30","publicationDate":"","coverUrl":""},
+{"title":"Four Thousand Weeks","author":"Oliver Burkeman","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-05-30","publicationDate":"","coverUrl":""},
+{"title":"Meditations","author":"Marcus Aurelius; Gregory Hays (trans.)","status":"read","genre":"","fictionType":"Nonfiction","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2025-06-13","publicationDate":"","coverUrl":""},
+{"title":"Build","author":"Tony Fadell","status":"read","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2025-06-20","publicationDate":"","coverUrl":""},
+{"title":"Abundance","author":"Ezra Klein; Derek Thompson","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-07-01","publicationDate":"","coverUrl":""},
+{"title":"Surface Detail","author":"Iain M. Banks","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-08-03","publicationDate":"","coverUrl":""},
+{"title":"Vera or Faith","author":"Gary Shteyngart","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-09-02","publicationDate":"","coverUrl":""},
+{"title":"The Terminal List","author":"Jack Carr","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-10-27","publicationDate":"","coverUrl":""},
+{"title":"The Emergency","author":"George Packer","status":"read","genre":"","fictionType":"","difficulty":"","formats":["audible"],"notes":"","isbn":"","acquiredDate":"2025-11-19","publicationDate":"","coverUrl":""},
+{"title":"When Montezuma Met Cortés","author":"Matthew Restall","status":"unread","genre":"","fictionType":"","difficulty":"","formats":["physical"],"notes":"","isbn":"","acquiredDate":"2025-11-19","publicationDate":"","coverUrl":""}
+]
