@@ -995,42 +995,44 @@ async function useOCRResult() {
   
   showToast('🔍 Searching for book...');
   
-  // Search Google Books by title and author
+  // Try multiple search strategies
   try {
-    const query = [];
-    if (currentOcrData.title) query.push(`intitle:${currentOcrData.title}`);
-    if (currentOcrData.author) query.push(`inauthor:${currentOcrData.author}`);
+    let bookData = null;
     
-    const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query.join('+'))}`;
-    console.log('Searching:', url);
-    
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    if (!data.items || data.items.length === 0) {
-      showToast('❌ Book not found. Please enter details manually.');
-      // Pre-fill what we have
-      if (currentOcrData.title) document.getElementById('bookTitle').value = currentOcrData.title;
-      if (currentOcrData.author) document.getElementById('bookAuthor').value = currentOcrData.author;
-      return;
+    // Strategy 1: Search by title AND author (most specific)
+    if (currentOcrData.title && currentOcrData.author) {
+      console.log('Strategy 1: Title + Author');
+      bookData = await searchGoogleBooks(currentOcrData.title, currentOcrData.author);
     }
     
-    // Use first result
-    const book = data.items[0].volumeInfo;
-    console.log('Found book:', book);
-    
-    // Fill in details
-    if (book.title) {
-      document.getElementById('bookTitle').value = book.title;
+    // Strategy 2: Search by title only (if strategy 1 failed)
+    if (!bookData && currentOcrData.title) {
+      console.log('Strategy 2: Title only');
+      bookData = await searchGoogleBooks(currentOcrData.title, null);
     }
     
-    if (book.authors && book.authors.length > 0) {
-      document.getElementById('bookAuthor').value = book.authors.join(', ');
+    // Strategy 3: Search by author only (if strategy 2 failed)
+    if (!bookData && currentOcrData.author) {
+      console.log('Strategy 3: Author only');
+      bookData = await searchGoogleBooks(null, currentOcrData.author);
     }
     
-    if (book.industryIdentifiers) {
-      const isbn13 = book.industryIdentifiers.find(id => id.type === 'ISBN_13');
-      const isbn10 = book.industryIdentifiers.find(id => id.type === 'ISBN_10');
+    if (!bookData) {
+      throw new Error('No results found');
+    }
+    
+    // Fill in details from found book
+    if (bookData.title) {
+      document.getElementById('bookTitle').value = bookData.title;
+    }
+    
+    if (bookData.authors && bookData.authors.length > 0) {
+      document.getElementById('bookAuthor').value = bookData.authors.join(', ');
+    }
+    
+    if (bookData.industryIdentifiers) {
+      const isbn13 = bookData.industryIdentifiers.find(id => id.type === 'ISBN_13');
+      const isbn10 = bookData.industryIdentifiers.find(id => id.type === 'ISBN_10');
       if (isbn13) {
         document.getElementById('bookISBN').value = isbn13.identifier;
       } else if (isbn10) {
@@ -1038,28 +1040,77 @@ async function useOCRResult() {
       }
     }
     
-    if (book.publishedDate) {
-      document.getElementById('bookPublicationDate').value = book.publishedDate;
+    if (bookData.publishedDate) {
+      document.getElementById('bookPublicationDate').value = bookData.publishedDate;
     }
     
-    if (book.imageLinks && book.imageLinks.thumbnail) {
-      document.getElementById('bookCoverUrl').value = book.imageLinks.thumbnail.replace('http:', 'https:');
+    if (bookData.imageLinks && bookData.imageLinks.thumbnail) {
+      document.getElementById('bookCoverUrl').value = bookData.imageLinks.thumbnail.replace('http:', 'https:');
     }
     
     // Try to classify from categories
-    if (book.categories && book.categories.length > 0) {
-      autoClassifyFromSubjects(book.categories.map(c => c.toLowerCase()));
+    if (bookData.categories && bookData.categories.length > 0) {
+      autoClassifyFromSubjects(bookData.categories.map(c => c.toLowerCase()));
     }
     
     showToast('✅ Book found! Review and save.');
     
   } catch (error) {
     console.error('Lookup error:', error);
-    showToast('❌ Could not find book. Please enter details manually.');
-    // Pre-fill what we have
-    if (currentOcrData.title) document.getElementById('bookTitle').value = currentOcrData.title;
-    if (currentOcrData.author) document.getElementById('bookAuthor').value = currentOcrData.author;
+    showToast('❌ Could not find book in database. Pre-filled what we extracted - please review.');
+    
+    // Pre-fill what we extracted from OCR
+    if (currentOcrData.title) {
+      document.getElementById('bookTitle').value = currentOcrData.title;
+    }
+    if (currentOcrData.author) {
+      document.getElementById('bookAuthor').value = currentOcrData.author;
+    }
   }
+}
+
+// Search Google Books with different strategies
+async function searchGoogleBooks(title, author) {
+  const queryParts = [];
+  
+  if (title) {
+    // Clean title - remove common words that might confuse search
+    const cleanTitle = title
+      .replace(/^(the|a|an)\s+/i, '') // Remove leading articles
+      .trim();
+    queryParts.push(`intitle:"${cleanTitle}"`);
+  }
+  
+  if (author) {
+    // Clean author - just last name might work better
+    const authorParts = author.split(/\s+/);
+    const lastName = authorParts[authorParts.length - 1];
+    queryParts.push(`inauthor:${lastName}`);
+  }
+  
+  if (queryParts.length === 0) {
+    return null;
+  }
+  
+  const query = queryParts.join('+');
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=5`;
+  
+  console.log('Searching Google Books:', url);
+  console.log('Query parts:', queryParts);
+  
+  const response = await fetch(url);
+  const data = await response.json();
+  
+  console.log('Google Books response:', data);
+  
+  if (!data.items || data.items.length === 0) {
+    console.log('No results found');
+    return null;
+  }
+  
+  // Return the first result
+  console.log('Found book:', data.items[0].volumeInfo);
+  return data.items[0].volumeInfo;
 }
 
 // Initialize app when DOM is ready
