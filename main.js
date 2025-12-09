@@ -50,8 +50,9 @@ const bookModalClose = document.getElementById('bookModalClose');
 const bookForm = document.getElementById('bookForm');
 const modalTitle = document.getElementById('modalTitle');
 const saveBookBtn = document.getElementById('saveBookBtn');
-const isbnLookupBtn = document.getElementById('isbnLookupBtn');
-const bookISBNLookup = document.getElementById('bookISBNLookup');
+const scanBarcodeBtn = document.getElementById('scanBarcodeBtn');
+const barcodeScannerModal = document.getElementById('barcodeScannerModal');
+const cancelScanBtn = document.getElementById('cancelScanBtn');
 
 // Initialize app
 function init() {
@@ -103,7 +104,8 @@ function setupEventListeners() {
   bookModalBackdrop.addEventListener('click', closeBookModal);
   bookModalClose.addEventListener('click', closeBookModal);
   bookForm.addEventListener('submit', handleSaveBook);
-  isbnLookupBtn.addEventListener('click', handleISBNLookup);
+  scanBarcodeBtn.addEventListener('click', startBarcodeScanner);
+  cancelScanBtn.addEventListener('click', stopBarcodeScanner);
 
   // Import/Export listeners
   importBtn.addEventListener('click', handleImport);
@@ -555,22 +557,81 @@ function showToast(message) {
   }, 3000);
 }
 
-// Handle ISBN lookup using Open Library API
-async function handleISBNLookup() {
-  const isbn = bookISBNLookup.value.trim().replace(/[^0-9X]/gi, ''); // Remove non-ISBN characters
+// Start barcode scanner using QuaggaJS
+function startBarcodeScanner() {
+  barcodeScannerModal.classList.add('active');
   
-  if (!isbn || (isbn.length !== 10 && isbn.length !== 13)) {
-    alert('Please enter a valid 10 or 13 digit ISBN');
-    return;
-  }
+  Quagga.init({
+    inputStream: {
+      name: "Live",
+      type: "LiveStream",
+      target: document.querySelector('#barcodeScannerVideo'),
+      constraints: {
+        width: 640,
+        height: 480,
+        facingMode: "environment" // Use back camera on mobile
+      },
+    },
+    decoder: {
+      readers: [
+        "ean_reader",      // EAN-13 (most common for books)
+        "ean_8_reader",    // EAN-8
+        "code_128_reader", // Code 128
+        "code_39_reader",  // Code 39
+        "upc_reader",      // UPC
+        "upc_e_reader"     // UPC-E
+      ]
+    },
+    locate: true,
+    locator: {
+      patchSize: "medium",
+      halfSample: true
+    },
+  }, (err) => {
+    if (err) {
+      console.error('QuaggaJS init error:', err);
+      alert('Could not access camera. Please check permissions.');
+      stopBarcodeScanner();
+      return;
+    }
+    Quagga.start();
+  });
+
+  // Listen for successful barcode detection
+  Quagga.onDetected(handleBarcodeDetected);
+}
+
+// Stop barcode scanner
+function stopBarcodeScanner() {
+  Quagga.stop();
+  Quagga.offDetected(handleBarcodeDetected);
+  barcodeScannerModal.classList.remove('active');
+}
+
+// Handle detected barcode
+async function handleBarcodeDetected(result) {
+  const code = result.codeResult.code;
   
-  showToast('Looking up ISBN...');
-  isbnLookupBtn.disabled = true;
-  isbnLookupBtn.textContent = '⏳ Looking up...';
+  // Stop scanner immediately
+  stopBarcodeScanner();
+  
+  // Show toast
+  showToast(`Barcode detected: ${code}`);
+  
+  // Look up the ISBN
+  await lookupISBN(code);
+}
+
+// Lookup ISBN using Open Library API
+async function lookupISBN(isbn) {
+  showToast('Looking up book details...');
   
   try {
-    // Try Open Library API first
-    const response = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
+    // Clean ISBN (remove hyphens, spaces)
+    const cleanISBN = isbn.replace(/[^0-9X]/gi, '');
+    
+    // Try Open Library API
+    const response = await fetch(`https://openlibrary.org/isbn/${cleanISBN}.json`);
     
     if (!response.ok) {
       throw new Error('Book not found');
@@ -585,16 +646,20 @@ async function handleISBNLookup() {
     
     // Get author info
     if (data.authors && data.authors.length > 0) {
-      const authorKey = data.authors[0].key;
-      const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`);
-      const authorData = await authorResponse.json();
-      if (authorData.name) {
-        document.getElementById('bookAuthor').value = authorData.name;
+      try {
+        const authorKey = data.authors[0].key;
+        const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`);
+        const authorData = await authorResponse.json();
+        if (authorData.name) {
+          document.getElementById('bookAuthor').value = authorData.name;
+        }
+      } catch (e) {
+        console.error('Author fetch error:', e);
       }
     }
     
     // Set ISBN
-    document.getElementById('bookISBN').value = isbn;
+    document.getElementById('bookISBN').value = cleanISBN;
     
     // Get publication date
     if (data.publish_date) {
@@ -617,10 +682,7 @@ async function handleISBNLookup() {
     
   } catch (error) {
     console.error('ISBN lookup error:', error);
-    showToast('Book not found. Try entering details manually.');
-  } finally {
-    isbnLookupBtn.disabled = false;
-    isbnLookupBtn.textContent = '🔍 Lookup';
+    showToast('❌ Book not found in database. Please enter details manually.');
   }
 }
 
@@ -629,11 +691,11 @@ function autoClassifyFromSubjects(subjects) {
   const subjectStr = subjects.join(' ');
   
   // Fiction vs Nonfiction detection
-  if (subjects.includes('fiction') || subjects.includes('novel')) {
+  if (subjects.includes('fiction') || subjects.includes('novel') || subjects.includes('science fiction')) {
     document.getElementById('bookFictionType').value = 'Fiction';
     
     // Genre detection for fiction
-    if (subjectStr.includes('science fiction') || subjectStr.includes('sci-fi')) {
+    if (subjectStr.includes('science fiction') || subjectStr.includes('sci-fi') || subjectStr.includes('sf')) {
       document.getElementById('bookGenre').value = 'Science Fiction';
     } else if (subjectStr.includes('fantasy')) {
       document.getElementById('bookGenre').value = 'Fantasy';
