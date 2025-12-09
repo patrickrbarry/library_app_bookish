@@ -422,11 +422,18 @@ function openBookModal(book = null) {
     modalTitle.textContent = 'Add New Book';
     bookForm.reset();
     delete bookForm.dataset.editId;
+    
+    // Scroll to top of modal to show "Quick Add by Photo" section
+    setTimeout(() => {
+      const modalBody = document.querySelector('.modal-body');
+      if (modalBody) {
+        modalBody.scrollTop = 0;
+      }
+    }, 100);
   }
   
   bookModal.classList.add('open');
   bookModal.setAttribute('aria-hidden', 'false');
-  document.getElementById('bookTitle').focus();
 }
 
 // Close book modal
