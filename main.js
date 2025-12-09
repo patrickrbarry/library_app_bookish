@@ -9,7 +9,6 @@ let currentDetailBook = null;
 const searchInput = document.getElementById('searchInput');
 const fictionFilter = document.getElementById('fictionFilter');
 const genreFilter = document.getElementById('genreFilter');
-const difficultyFilter = document.getElementById('difficultyFilter');
 const statusFilter = document.getElementById('statusFilter');
 const formatCheckboxes = {
   audible: document.getElementById('audibleFilter'),
@@ -97,7 +96,6 @@ function setupEventListeners() {
   searchInput.addEventListener('input', applyFilters);
   fictionFilter.addEventListener('change', applyFilters);
   genreFilter.addEventListener('change', applyFilters);
-  difficultyFilter.addEventListener('change', applyFilters);
   statusFilter.addEventListener('change', applyFilters);
   
   Object.values(formatCheckboxes).forEach(checkbox => {
@@ -165,7 +163,6 @@ function applyFilters() {
   const term = searchInput.value.toLowerCase().trim();
   const fictionVal = fictionFilter.value;
   const genreVal = genreFilter.value;
-  const diffVal = difficultyFilter.value;
   const statusVal = statusFilter.value;
   
   const wantAudible = formatCheckboxes.audible.checked;
@@ -191,9 +188,6 @@ function applyFilters() {
 
     // Genre filter
     if (genreVal && book.genre !== genreVal) return false;
-
-    // Difficulty filter
-    if (diffVal && book.difficulty !== diffVal) return false;
 
     // Status filter
     if (statusVal && book.status !== statusVal) return false;
