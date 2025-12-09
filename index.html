@@ -618,125 +618,89 @@
       padding: 1.5rem;
     }
 
-    .scan-section {
-      background: linear-gradient(135deg, #7b4b2a 0%, #a0643a 100%);
-      padding: 1.5rem;
+    .scan-options {
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      border: 2px solid #f59e0b;
+      padding: 1.25rem;
       border-radius: 0.75rem;
-      margin-bottom: 1.5rem;
-      text-align: center;
+      margin-bottom: 1rem;
     }
 
-    .btn-scan-barcode {
-      width: 100%;
-      padding: 1rem 1.5rem;
-      font-size: 1.1rem;
-      font-weight: 600;
-      border-radius: 0.5rem;
-      border: none;
+    .scan-btn {
+      padding: 1rem;
       background: white;
-      color: #7b4b2a;
+      border: 2px solid #f59e0b;
+      border-radius: 0.5rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #92400e;
       cursor: pointer;
       transition: all 0.2s;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
 
-    .btn-scan-barcode:hover {
+    .scan-btn:hover {
+      background: #fffbeb;
       transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
     }
 
-    .btn-scan-barcode:active {
+    .scan-btn:active {
       transform: translateY(0);
     }
 
-    .scan-hint {
-      color: rgba(255,255,255,0.9);
-      font-size: 0.85rem;
-      margin: 0.75rem 0 0 0;
+    .isbn-quick-add {
+      background: #f8f9fa;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      margin-bottom: 1rem;
     }
 
-    #barcodeScannerModal {
+    #ocrCamera {
       position: fixed;
       inset: 0;
       background: black;
       z-index: 2000;
       display: none;
       flex-direction: column;
-    }
-
-    #barcodeScannerModal.active {
-      display: flex;
-    }
-
-    #barcodeScannerVideo {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    .scanner-overlay {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
-      pointer-events: none;
     }
 
-    .scanner-frame {
-      width: 80%;
-      max-width: 400px;
-      aspect-ratio: 3/2;
-      border: 3px solid #4ade80;
-      border-radius: 1rem;
-      box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);
-      position: relative;
+    #ocrCamera.active {
+      display: flex;
     }
 
-    .scanner-line {
-      position: absolute;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background: #4ade80;
-      animation: scan 2s ease-in-out infinite;
-    }
-
-    @keyframes scan {
-      0%, 100% { top: 0; }
-      50% { top: 100%; }
-    }
-
-    .scanner-message {
-      margin-top: 2rem;
-      color: white;
-      font-size: 1.1rem;
-      font-weight: 500;
-      text-align: center;
-      pointer-events: auto;
-      background: rgba(0,0,0,0.7);
-      padding: 1rem 2rem;
+    #ocrCameraVideo {
+      max-width: 100%;
+      max-height: 70vh;
       border-radius: 0.5rem;
     }
 
-    .scanner-controls {
+    .camera-controls {
       position: absolute;
       bottom: 2rem;
-      left: 50%;
-      transform: translateX(-50%);
-      pointer-events: auto;
+      display: flex;
+      gap: 1rem;
     }
 
-    .scanner-cancel {
+    .camera-btn {
       padding: 1rem 2rem;
-      background: rgba(220, 38, 38, 0.9);
-      color: white;
       border: none;
-      border-radius: 0.5rem;
-      font-size: 1rem;
+      border-radius: 999px;
+      font-size: 1.1rem;
       font-weight: 600;
       cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .camera-btn-capture {
+      background: #10b981;
+      color: white;
+    }
+
+    .camera-btn-cancel {
+      background: #ef4444;
+      color: white;
     }
 
     .form-divider {
@@ -1020,11 +984,35 @@
       </div>
       <form id="bookForm">
         <div class="modal-body">
-          <div class="scan-section">
-            <button type="button" class="btn-scan-barcode" id="scanBarcodeBtn">
-              📷 Scan Barcode with Camera
-            </button>
-            <p class="scan-hint">Point camera at book barcode to auto-fill details</p>
+          <div class="scan-options">
+            <h3 style="margin: 0 0 0.75rem 0; font-size: 1rem; color: #666;">📸 Quick Add by Photo</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem;">
+              <button type="button" class="scan-btn" id="scanTitleBtn">
+                📖 Scan Title Page
+              </button>
+              <button type="button" class="scan-btn" id="scanSpineBtn">
+                📚 Scan Spine
+              </button>
+            </div>
+            <p style="font-size: 0.85rem; color: #666; margin: 0 0 0.5rem 0;">Take a clear photo of the book's title page or spine. The app will extract the title and author.</p>
+            
+            <div id="ocrResultBox" style="display: none; background: #f0fdf4; border: 2px solid #86efac; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem;">
+              <strong style="color: #15803d;">Found:</strong>
+              <div id="ocrExtractedText" style="margin: 0.5rem 0; font-size: 0.9rem; color: #166534;"></div>
+              <button type="button" class="btn-primary" id="useOcrResultBtn" style="width: 100%; margin-top: 0.5rem;">✓ Use This & Lookup Book</button>
+            </div>
+          </div>
+
+          <div style="text-align: center; margin: 1rem 0;">
+            <strong style="color: #999; font-size: 0.85rem;">— OR LOOKUP BY ISBN —</strong>
+          </div>
+
+          <div class="isbn-quick-add">
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="isbnInput" placeholder="Paste ISBN here (10 or 13 digits)" style="flex: 1; padding: 0.75rem; border: 2px solid #ddd; border-radius: 0.5rem; font-size: 1rem;" />
+              <button type="button" class="btn-primary" id="isbnLookupBtn" style="white-space: nowrap; padding: 0.75rem 1.5rem;">🔍 Lookup</button>
+            </div>
+            <p style="font-size: 0.8rem; color: #666; margin: 0.5rem 0 0 0;">Use iPhone Camera app → Point at barcode → Tap ISBN → Copy → Paste here</p>
           </div>
 
           <div class="form-divider">
@@ -1118,21 +1106,16 @@
     <span id="toastMessage"></span>
   </div>
 
-  <!-- Barcode Scanner Modal -->
-  <div id="barcodeScannerModal">
-    <div id="barcodeScannerVideo"></div>
-    <div class="scanner-overlay">
-      <div class="scanner-frame">
-        <div class="scanner-line"></div>
-      </div>
-      <div class="scanner-message">Point camera at barcode</div>
-    </div>
-    <div class="scanner-controls">
-      <button class="scanner-cancel" id="cancelScanBtn">Cancel</button>
+  <!-- OCR Camera Modal -->
+  <div id="ocrCamera">
+    <video id="ocrCameraVideo" autoplay playsinline></video>
+    <div class="camera-controls">
+      <button class="camera-btn camera-btn-capture" id="ocrCaptureBtn">📸 Capture</button>
+      <button class="camera-btn camera-btn-cancel" id="ocrCancelBtn">✕ Cancel</button>
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.0/dist/tesseract.min.js"></script>
   <script src="data.js"></script>
   <script src="main.js"></script>
 </body>
