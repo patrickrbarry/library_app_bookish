@@ -545,7 +545,7 @@ function handleExport() {
 }
 
 // Show toast notification
-function showToast(message) {
+function showToast(message, duration = 3000) {
   const toast = document.getElementById('toast');
   const toastMessage = document.getElementById('toastMessage');
   
@@ -554,7 +554,7 @@ function showToast(message) {
   
   setTimeout(() => {
     toast.classList.remove('show');
-  }, 3000);
+  }, duration);
 }
 
 // Start barcode scanner using QuaggaJS
@@ -632,19 +632,40 @@ async function handleBarcodeDetected(result) {
     lastDetectedCode = '';
   }, 3000);
   
-  // Validate it looks like an ISBN (10 or 13 digits)
+  console.log('Barcode detected:', code);
+  
+  // Validate it looks like an ISBN
   const cleanCode = code.replace(/[^0-9X]/gi, '');
-  if (cleanCode.length !== 10 && cleanCode.length !== 13) {
-    console.log('Invalid ISBN length:', cleanCode.length, 'Code:', code);
-    showToast(`Detected: ${code} (not a valid ISBN, keep scanning...)`);
+  
+  // ISBN-13 should be 13 digits starting with 978 or 979
+  // ISBN-10 should be 10 digits
+  const isISBN13 = cleanCode.length === 13 && (cleanCode.startsWith('978') || cleanCode.startsWith('979'));
+  const isISBN10 = cleanCode.length === 10;
+  
+  if (!isISBN13 && !isISBN10) {
+    console.log('❌ Not an ISBN - Length:', cleanCode.length, 'Starts with:', cleanCode.substring(0, 3));
+    
+    // Show message but keep scanning
+    const scannerMessage = document.querySelector('.scanner-message');
+    if (scannerMessage) {
+      scannerMessage.textContent = `Detected: ${cleanCode.substring(0, 15)}... (not ISBN, keep scanning)`;
+      scannerMessage.style.background = 'rgba(239, 68, 68, 0.9)';
+      
+      setTimeout(() => {
+        scannerMessage.textContent = 'Point camera at ISBN barcode';
+        scannerMessage.style.background = 'rgba(0,0,0,0.7)';
+      }, 2000);
+    }
     return;
   }
   
-  // Stop scanner immediately
+  console.log('✅ Valid ISBN detected!');
+  
+  // Stop scanner
   stopBarcodeScanner();
   
-  // Show toast with detected code
-  showToast(`📖 ISBN detected: ${cleanCode}`);
+  // Show toast with detected code (longer duration)
+  showToast(`📖 ISBN: ${cleanCode}`, 5000);
   
   // Look up the ISBN
   await lookupISBN(cleanCode);
