@@ -327,12 +327,21 @@
 
     /* Responsive */
     @media (max-width: 768px) {
+      .header-left h1 {
+        font-size: 1.2rem;
+      }
+
       .header-left p {
         display: none;
       }
 
-      .header-btn:not(.primary) {
-        display: none;
+      .header-actions {
+        gap: 0.35rem;
+      }
+
+      .header-btn {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
       }
 
       th:nth-child(4),
@@ -951,8 +960,8 @@
         <p>Your personal collection across all formats</p>
       </div>
       <div class="header-actions">
-        <button class="header-btn" id="importBtn">Import</button>
-        <button class="header-btn" id="exportBtn">Export</button>
+        <button class="header-btn" id="importBtn" data-icon="📥">📥 Import</button>
+        <button class="header-btn" id="exportBtn" data-icon="📤">📤 Export</button>
         <button class="header-btn primary" id="addBookBtn">+ Add Book</button>
       </div>
     </div>
