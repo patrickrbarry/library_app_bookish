@@ -7,6 +7,8 @@
   <meta name="theme-color" content="#7b4b2a" />
   <meta name="description" content="Your personal book library tracker across all formats" />
   <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192x192.png" />
+  <link rel="apple-touch-icon" href="icon-192x192.png" />
   <style>
     :root {
       color-scheme: light;
@@ -956,12 +958,11 @@
   <header>
     <div class="header-content">
       <div class="header-left">
-        <h1>📚 Bookish Library</h1>
+        <h1>📚 Bookish</h1>
         <p>Your personal collection across all formats</p>
       </div>
       <div class="header-actions">
         <button class="header-btn" id="importBtn" data-icon="📥">📥 Import</button>
-        <button class="header-btn" id="exportBtn" data-icon="📤">📤 Export</button>
         <button class="header-btn primary" id="addBookBtn">+ Add Book</button>
       </div>
     </div>
@@ -997,16 +998,6 @@
           <option value="unread">Unread</option>
           <option value="reading">Reading</option>
           <option value="read">Read</option>
-        </select>
-      </div>
-
-      <div class="filter-group">
-        <label for="difficultyFilter">Difficulty</label>
-        <select id="difficultyFilter">
-          <option value="">All</option>
-          <option value="Light">Light</option>
-          <option value="Moderate">Moderate</option>
-          <option value="Dense">Dense</option>
         </select>
       </div>
 
