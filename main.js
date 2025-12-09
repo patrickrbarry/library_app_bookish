@@ -609,97 +609,155 @@ function stopBarcodeScanner() {
 }
 
 // Handle detected barcode
+let lastDetectedCode = '';
+let detectionTimeout = null;
+
 async function handleBarcodeDetected(result) {
   const code = result.codeResult.code;
+  
+  // Ignore if same code detected recently (debounce)
+  if (code === lastDetectedCode) {
+    return;
+  }
+  
+  lastDetectedCode = code;
+  
+  // Clear any existing timeout
+  if (detectionTimeout) {
+    clearTimeout(detectionTimeout);
+  }
+  
+  // Reset after 3 seconds
+  detectionTimeout = setTimeout(() => {
+    lastDetectedCode = '';
+  }, 3000);
+  
+  // Validate it looks like an ISBN (10 or 13 digits)
+  const cleanCode = code.replace(/[^0-9X]/gi, '');
+  if (cleanCode.length !== 10 && cleanCode.length !== 13) {
+    console.log('Invalid ISBN length:', cleanCode.length, 'Code:', code);
+    showToast(`Detected: ${code} (not a valid ISBN, keep scanning...)`);
+    return;
+  }
   
   // Stop scanner immediately
   stopBarcodeScanner();
   
-  // Show toast
-  showToast(`Barcode detected: ${code}`);
+  // Show toast with detected code
+  showToast(`📖 ISBN detected: ${cleanCode}`);
   
   // Look up the ISBN
-  await lookupISBN(code);
+  await lookupISBN(cleanCode);
 }
 
 // Lookup ISBN using Open Library API
 async function lookupISBN(isbn) {
-  console.log('Looking up ISBN:', isbn);
-  showToast(`Looking up ISBN: ${isbn}...`);
+  console.log('=== ISBN LOOKUP START ===');
+  console.log('Original ISBN:', isbn);
+  showToast(`🔍 Looking up: ${isbn}`);
   
   try {
     // Clean ISBN (remove hyphens, spaces)
     const cleanISBN = isbn.replace(/[^0-9X]/gi, '');
-    console.log('Clean ISBN:', cleanISBN);
+    console.log('Clean ISBN:', cleanISBN, 'Length:', cleanISBN.length);
     
-    // Try Open Library API
-    const url = `https://openlibrary.org/isbn/${cleanISBN}.json`;
-    console.log('Fetching:', url);
-    
-    const response = await fetch(url);
-    console.log('Response status:', response.status);
-    
-    if (!response.ok) {
-      // Try alternate API - Google Books
-      console.log('Open Library failed, trying Google Books...');
-      await lookupGoogleBooks(cleanISBN);
-      return;
+    // If ISBN-10, try to convert to ISBN-13
+    let isbn13 = cleanISBN;
+    if (cleanISBN.length === 10) {
+      isbn13 = convertISBN10to13(cleanISBN);
+      console.log('Converted ISBN-10 to ISBN-13:', isbn13);
     }
     
-    const data = await response.json();
-    console.log('Open Library data:', data);
+    // Try both ISBN-13 and ISBN-10
+    const isbnsToTry = cleanISBN.length === 10 ? [isbn13, cleanISBN] : [cleanISBN];
     
-    // Extract title
-    if (data.title) {
-      document.getElementById('bookTitle').value = data.title;
-    }
-    
-    // Get author info
-    if (data.authors && data.authors.length > 0) {
-      try {
-        const authorKey = data.authors[0].key;
-        const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`);
-        const authorData = await authorResponse.json();
-        if (authorData.name) {
-          document.getElementById('bookAuthor').value = authorData.name;
+    for (const isbnToTry of isbnsToTry) {
+      console.log('Trying ISBN:', isbnToTry);
+      
+      // Try Open Library API
+      const url = `https://openlibrary.org/isbn/${isbnToTry}.json`;
+      console.log('Fetching:', url);
+      
+      const response = await fetch(url);
+      console.log('Response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Open Library SUCCESS! Data:', data);
+        
+        // Extract title
+        if (data.title) {
+          document.getElementById('bookTitle').value = data.title;
         }
-      } catch (e) {
-        console.error('Author fetch error:', e);
-        // If author fetch fails, try to get from publishers
-        if (data.by_statement) {
-          document.getElementById('bookAuthor').value = data.by_statement;
+        
+        // Get author info
+        if (data.authors && data.authors.length > 0) {
+          try {
+            const authorKey = data.authors[0].key;
+            const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`);
+            const authorData = await authorResponse.json();
+            if (authorData.name) {
+              document.getElementById('bookAuthor').value = authorData.name;
+            }
+          } catch (e) {
+            console.error('Author fetch error:', e);
+            // If author fetch fails, try to get from publishers
+            if (data.by_statement) {
+              document.getElementById('bookAuthor').value = data.by_statement;
+            }
+          }
         }
+        
+        // Set ISBN
+        document.getElementById('bookISBN').value = isbnToTry;
+        
+        // Get publication date
+        if (data.publish_date) {
+          document.getElementById('bookPublicationDate').value = data.publish_date;
+        }
+        
+        // Get cover URL
+        if (data.covers && data.covers.length > 0) {
+          const coverId = data.covers[0];
+          document.getElementById('bookCoverUrl').value = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+        }
+        
+        // Try to get subjects for genre classification
+        if (data.subjects && data.subjects.length > 0) {
+          const subjects = data.subjects.map(s => s.toLowerCase());
+          autoClassifyFromSubjects(subjects);
+        }
+        
+        showToast('✅ Book found! Review and save.');
+        return; // Success!
       }
     }
     
-    // Set ISBN
-    document.getElementById('bookISBN').value = cleanISBN;
-    
-    // Get publication date
-    if (data.publish_date) {
-      document.getElementById('bookPublicationDate').value = data.publish_date;
-    }
-    
-    // Get cover URL
-    if (data.covers && data.covers.length > 0) {
-      const coverId = data.covers[0];
-      document.getElementById('bookCoverUrl').value = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
-    }
-    
-    // Try to get subjects for genre classification
-    if (data.subjects && data.subjects.length > 0) {
-      const subjects = data.subjects.map(s => s.toLowerCase());
-      autoClassifyFromSubjects(subjects);
-    }
-    
-    showToast('✅ Book found! Review and save.');
+    // If Open Library failed, try Google Books
+    console.log('Open Library failed for all ISBNs, trying Google Books...');
+    await lookupGoogleBooks(isbn13 || cleanISBN);
     
   } catch (error) {
     console.error('ISBN lookup error:', error);
     // Try Google Books as backup
-    console.log('Trying Google Books as backup...');
+    console.log('Error occurred, trying Google Books as backup...');
     await lookupGoogleBooks(isbn.replace(/[^0-9X]/gi, ''));
   }
+}
+
+// Convert ISBN-10 to ISBN-13
+function convertISBN10to13(isbn10) {
+  // Remove check digit and add 978 prefix
+  const base = '978' + isbn10.substring(0, 9);
+  
+  // Calculate ISBN-13 check digit
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(base[i]) * (i % 2 === 0 ? 1 : 3);
+  }
+  const checkDigit = (10 - (sum % 10)) % 10;
+  
+  return base + checkDigit;
 }
 
 // Backup lookup using Google Books API
@@ -710,13 +768,14 @@ async function lookupGoogleBooks(isbn) {
     
     const response = await fetch(url);
     const data = await response.json();
-    console.log('Google Books data:', data);
+    console.log('Google Books response:', data);
     
     if (!data.items || data.items.length === 0) {
       throw new Error('Book not found in Google Books either');
     }
     
     const book = data.items[0].volumeInfo;
+    console.log('✅ Google Books SUCCESS! Book:', book);
     
     // Extract data
     if (book.title) {
@@ -742,11 +801,12 @@ async function lookupGoogleBooks(isbn) {
       autoClassifyFromSubjects(book.categories.map(c => c.toLowerCase()));
     }
     
-    showToast('✅ Book found (via Google Books)! Review and save.');
+    showToast('✅ Book found (Google Books)! Review and save.');
     
   } catch (error) {
     console.error('Google Books lookup error:', error);
-    showToast('❌ Book not found. Please enter details manually.');
+    console.log('=== LOOKUP FAILED - Book not in any database ===');
+    showToast(`❌ ISBN ${isbn} not found. Enter details manually.`);
     // Pre-fill ISBN at least
     document.getElementById('bookISBN').value = isbn;
   }
