@@ -618,11 +618,125 @@
       padding: 1.5rem;
     }
 
-    .isbn-lookup {
-      background: #f8f9fa;
-      padding: 1rem;
+    .scan-section {
+      background: linear-gradient(135deg, #7b4b2a 0%, #a0643a 100%);
+      padding: 1.5rem;
+      border-radius: 0.75rem;
+      margin-bottom: 1.5rem;
+      text-align: center;
+    }
+
+    .btn-scan-barcode {
+      width: 100%;
+      padding: 1rem 1.5rem;
+      font-size: 1.1rem;
+      font-weight: 600;
       border-radius: 0.5rem;
-      margin-bottom: 1rem;
+      border: none;
+      background: white;
+      color: #7b4b2a;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .btn-scan-barcode:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .btn-scan-barcode:active {
+      transform: translateY(0);
+    }
+
+    .scan-hint {
+      color: rgba(255,255,255,0.9);
+      font-size: 0.85rem;
+      margin: 0.75rem 0 0 0;
+    }
+
+    #barcodeScannerModal {
+      position: fixed;
+      inset: 0;
+      background: black;
+      z-index: 2000;
+      display: none;
+      flex-direction: column;
+    }
+
+    #barcodeScannerModal.active {
+      display: flex;
+    }
+
+    #barcodeScannerVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .scanner-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+
+    .scanner-frame {
+      width: 80%;
+      max-width: 400px;
+      aspect-ratio: 3/2;
+      border: 3px solid #4ade80;
+      border-radius: 1rem;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);
+      position: relative;
+    }
+
+    .scanner-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: #4ade80;
+      animation: scan 2s ease-in-out infinite;
+    }
+
+    @keyframes scan {
+      0%, 100% { top: 0; }
+      50% { top: 100%; }
+    }
+
+    .scanner-message {
+      margin-top: 2rem;
+      color: white;
+      font-size: 1.1rem;
+      font-weight: 500;
+      text-align: center;
+      pointer-events: auto;
+      background: rgba(0,0,0,0.7);
+      padding: 1rem 2rem;
+      border-radius: 0.5rem;
+    }
+
+    .scanner-controls {
+      position: absolute;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: auto;
+    }
+
+    .scanner-cancel {
+      padding: 1rem 2rem;
+      background: rgba(220, 38, 38, 0.9);
+      color: white;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
     }
 
     .form-divider {
@@ -906,15 +1020,11 @@
       </div>
       <form id="bookForm">
         <div class="modal-body">
-          <div class="isbn-lookup">
-            <div class="form-group" style="margin-bottom: 0.5rem;">
-              <label for="bookISBNLookup">Quick Add by ISBN</label>
-              <div style="display: flex; gap: 0.5rem;">
-                <input type="text" id="bookISBNLookup" placeholder="Enter ISBN (10 or 13 digits)" />
-                <button type="button" class="btn-primary" id="isbnLookupBtn" style="white-space: nowrap;">🔍 Lookup</button>
-              </div>
-              <small style="color: #666; font-size: 0.85rem;">Scan barcode with your camera app, then type the ISBN here</small>
-            </div>
+          <div class="scan-section">
+            <button type="button" class="btn-scan-barcode" id="scanBarcodeBtn">
+              📷 Scan Barcode with Camera
+            </button>
+            <p class="scan-hint">Point camera at book barcode to auto-fill details</p>
           </div>
 
           <div class="form-divider">
@@ -1008,6 +1118,21 @@
     <span id="toastMessage"></span>
   </div>
 
+  <!-- Barcode Scanner Modal -->
+  <div id="barcodeScannerModal">
+    <div id="barcodeScannerVideo"></div>
+    <div class="scanner-overlay">
+      <div class="scanner-frame">
+        <div class="scanner-line"></div>
+      </div>
+      <div class="scanner-message">Point camera at barcode</div>
+    </div>
+    <div class="scanner-controls">
+      <button class="scanner-cancel" id="cancelScanBtn">Cancel</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
   <script src="data.js"></script>
   <script src="main.js"></script>
 </body>
