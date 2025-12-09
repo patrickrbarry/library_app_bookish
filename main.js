@@ -50,9 +50,22 @@ const bookModalClose = document.getElementById('bookModalClose');
 const bookForm = document.getElementById('bookForm');
 const modalTitle = document.getElementById('modalTitle');
 const saveBookBtn = document.getElementById('saveBookBtn');
-const scanBarcodeBtn = document.getElementById('scanBarcodeBtn');
-const barcodeScannerModal = document.getElementById('barcodeScannerModal');
-const cancelScanBtn = document.getElementById('cancelScanBtn');
+const isbnInput = document.getElementById('isbnInput');
+const isbnLookupBtn = document.getElementById('isbnLookupBtn');
+
+// OCR Elements
+const scanTitleBtn = document.getElementById('scanTitleBtn');
+const scanSpineBtn = document.getElementById('scanSpineBtn');
+const ocrCamera = document.getElementById('ocrCamera');
+const ocrCameraVideo = document.getElementById('ocrCameraVideo');
+const ocrCaptureBtn = document.getElementById('ocrCaptureBtn');
+const ocrCancelBtn = document.getElementById('ocrCancelBtn');
+const ocrResultBox = document.getElementById('ocrResultBox');
+const ocrExtractedText = document.getElementById('ocrExtractedText');
+const useOcrResultBtn = document.getElementById('useOcrResultBtn');
+
+let ocrStream = null;
+let currentOcrData = null;
 
 // Initialize app
 function init() {
@@ -104,8 +117,22 @@ function setupEventListeners() {
   bookModalBackdrop.addEventListener('click', closeBookModal);
   bookModalClose.addEventListener('click', closeBookModal);
   bookForm.addEventListener('submit', handleSaveBook);
-  scanBarcodeBtn.addEventListener('click', startBarcodeScanner);
-  cancelScanBtn.addEventListener('click', stopBarcodeScanner);
+  isbnLookupBtn.addEventListener('click', handleISBNLookup);
+  
+  // Allow Enter key in ISBN input
+  isbnInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleISBNLookup();
+    }
+  });
+
+  // OCR listeners
+  scanTitleBtn.addEventListener('click', () => startOCRCamera('title'));
+  scanSpineBtn.addEventListener('click', () => startOCRCamera('spine'));
+  ocrCaptureBtn.addEventListener('click', captureAndProcessOCR);
+  ocrCancelBtn.addEventListener('click', stopOCRCamera);
+  useOcrResultBtn.addEventListener('click', useOCRResult);
 
   // Import/Export listeners
   importBtn.addEventListener('click', handleImport);
@@ -557,118 +584,35 @@ function showToast(message, duration = 3000) {
   }, duration);
 }
 
-// Start barcode scanner using QuaggaJS
-function startBarcodeScanner() {
-  barcodeScannerModal.classList.add('active');
+// Handle ISBN lookup from input field
+async function handleISBNLookup() {
+  const isbn = isbnInput.value.trim();
   
-  Quagga.init({
-    inputStream: {
-      name: "Live",
-      type: "LiveStream",
-      target: document.querySelector('#barcodeScannerVideo'),
-      constraints: {
-        width: 640,
-        height: 480,
-        facingMode: "environment" // Use back camera on mobile
-      },
-    },
-    decoder: {
-      readers: [
-        "ean_reader",      // EAN-13 (most common for books)
-        "ean_8_reader",    // EAN-8
-        "code_128_reader", // Code 128
-        "code_39_reader",  // Code 39
-        "upc_reader",      // UPC
-        "upc_e_reader"     // UPC-E
-      ]
-    },
-    locate: true,
-    locator: {
-      patchSize: "medium",
-      halfSample: true
-    },
-  }, (err) => {
-    if (err) {
-      console.error('QuaggaJS init error:', err);
-      alert('Could not access camera. Please check permissions.');
-      stopBarcodeScanner();
-      return;
-    }
-    Quagga.start();
-  });
-
-  // Listen for successful barcode detection
-  Quagga.onDetected(handleBarcodeDetected);
-}
-
-// Stop barcode scanner
-function stopBarcodeScanner() {
-  Quagga.stop();
-  Quagga.offDetected(handleBarcodeDetected);
-  barcodeScannerModal.classList.remove('active');
-}
-
-// Handle detected barcode
-let lastDetectedCode = '';
-let detectionTimeout = null;
-
-async function handleBarcodeDetected(result) {
-  const code = result.codeResult.code;
-  
-  // Ignore if same code detected recently (debounce)
-  if (code === lastDetectedCode) {
+  if (!isbn) {
+    alert('Please paste an ISBN number first');
     return;
   }
   
-  lastDetectedCode = code;
+  // Clean and validate
+  const cleanISBN = isbn.replace(/[^0-9X]/gi, '');
   
-  // Clear any existing timeout
-  if (detectionTimeout) {
-    clearTimeout(detectionTimeout);
-  }
-  
-  // Reset after 3 seconds
-  detectionTimeout = setTimeout(() => {
-    lastDetectedCode = '';
-  }, 3000);
-  
-  console.log('Barcode detected:', code);
-  
-  // Validate it looks like an ISBN
-  const cleanCode = code.replace(/[^0-9X]/gi, '');
-  
-  // ISBN-13 should be 13 digits starting with 978 or 979
-  // ISBN-10 should be 10 digits
-  const isISBN13 = cleanCode.length === 13 && (cleanCode.startsWith('978') || cleanCode.startsWith('979'));
-  const isISBN10 = cleanCode.length === 10;
-  
-  if (!isISBN13 && !isISBN10) {
-    console.log('❌ Not an ISBN - Length:', cleanCode.length, 'Starts with:', cleanCode.substring(0, 3));
-    
-    // Show message but keep scanning
-    const scannerMessage = document.querySelector('.scanner-message');
-    if (scannerMessage) {
-      scannerMessage.textContent = `Detected: ${cleanCode.substring(0, 15)}... (not ISBN, keep scanning)`;
-      scannerMessage.style.background = 'rgba(239, 68, 68, 0.9)';
-      
-      setTimeout(() => {
-        scannerMessage.textContent = 'Point camera at ISBN barcode';
-        scannerMessage.style.background = 'rgba(0,0,0,0.7)';
-      }, 2000);
-    }
+  if (cleanISBN.length !== 10 && cleanISBN.length !== 13) {
+    alert('Please enter a valid 10 or 13 digit ISBN');
     return;
   }
   
-  console.log('✅ Valid ISBN detected!');
+  // Disable button during lookup
+  isbnLookupBtn.disabled = true;
+  isbnLookupBtn.textContent = '⏳ Looking up...';
   
-  // Stop scanner
-  stopBarcodeScanner();
+  await lookupISBN(cleanISBN);
   
-  // Show toast with detected code (longer duration)
-  showToast(`📖 ISBN: ${cleanCode}`, 5000);
+  // Re-enable button
+  isbnLookupBtn.disabled = false;
+  isbnLookupBtn.textContent = '🔍 Lookup';
   
-  // Look up the ISBN
-  await lookupISBN(cleanCode);
+  // Clear input
+  isbnInput.value = '';
 }
 
 // Lookup ISBN using Open Library API
@@ -884,6 +828,237 @@ function autoClassifyFromSubjects(subjects) {
   // Default difficulty to Moderate (user can adjust)
   if (!document.getElementById('bookDifficulty').value) {
     document.getElementById('bookDifficulty').value = 'Moderate';
+  }
+}
+
+// Start OCR camera
+async function startOCRCamera(mode) {
+  try {
+    ocrStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }
+    });
+    
+    ocrCameraVideo.srcObject = ocrStream;
+    ocrCamera.classList.add('active');
+    ocrCameraVideo.setAttribute('data-mode', mode);
+    
+  } catch (error) {
+    console.error('Camera error:', error);
+    alert('Could not access camera. Please check permissions.');
+  }
+}
+
+// Stop OCR camera
+function stopOCRCamera() {
+  if (ocrStream) {
+    ocrStream.getTracks().forEach(track => track.stop());
+    ocrStream = null;
+  }
+  ocrCamera.classList.remove('active');
+}
+
+// Capture and process with OCR
+async function captureAndProcessOCR() {
+  const mode = ocrCameraVideo.getAttribute('data-mode');
+  
+  // Create canvas to capture image
+  const canvas = document.createElement('canvas');
+  canvas.width = ocrCameraVideo.videoWidth;
+  canvas.height = ocrCameraVideo.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(ocrCameraVideo, 0, 0);
+  
+  // Stop camera
+  stopOCRCamera();
+  
+  // Show processing message
+  showToast('🔍 Reading text from image... (this takes 3-5 seconds)', 10000);
+  
+  // Process with Tesseract
+  try {
+    const { data: { text } } = await Tesseract.recognize(
+      canvas.toDataURL('image/jpeg'),
+      'eng',
+      {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            const progress = Math.round(m.progress * 100);
+            showToast(`📖 Processing: ${progress}%`, 10000);
+          }
+        }
+      }
+    );
+    
+    console.log('OCR Raw text:', text);
+    
+    // Extract title and author
+    const extracted = extractTitleAuthor(text, mode);
+    
+    if (extracted.title || extracted.author) {
+      currentOcrData = extracted;
+      
+      // Show results
+      ocrExtractedText.innerHTML = `
+        ${extracted.title ? `<div><strong>Title:</strong> ${extracted.title}</div>` : ''}
+        ${extracted.author ? `<div><strong>Author:</strong> ${extracted.author}</div>` : ''}
+      `;
+      ocrResultBox.style.display = 'block';
+      
+      showToast('✅ Text extracted! Review and lookup.');
+    } else {
+      showToast('❌ Could not find title/author. Try again with better lighting.');
+    }
+    
+  } catch (error) {
+    console.error('OCR error:', error);
+    showToast('❌ OCR failed. Please try again or enter manually.');
+  }
+}
+
+// Extract title and author from OCR text
+function extractTitleAuthor(text, mode) {
+  console.log('Extracting from text:', text);
+  console.log('Mode:', mode);
+  
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  
+  let title = '';
+  let author = '';
+  
+  if (mode === 'title') {
+    // Title page: usually title is large text at top, author below
+    // Look for common patterns
+    const byPattern = /^by\s+(.+)$/i;
+    const authorKeywords = ['by', 'written by', 'author'];
+    
+    let foundBy = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Check if this is an author line
+      const byMatch = line.match(byPattern);
+      if (byMatch) {
+        author = byMatch[1].trim();
+        foundBy = true;
+        // Title is likely everything before this
+        if (!title && i > 0) {
+          title = lines.slice(0, i).join(' ').trim();
+        }
+        break;
+      }
+      
+      // Check for author keywords
+      const lowerLine = line.toLowerCase();
+      if (authorKeywords.some(kw => lowerLine.includes(kw))) {
+        author = line.replace(/^(by|written by|author):?\s*/i, '').trim();
+        foundBy = true;
+        if (!title && i > 0) {
+          title = lines.slice(0, i).join(' ').trim();
+        }
+        break;
+      }
+    }
+    
+    // If no "by" found, assume first 1-3 lines are title, next line is author
+    if (!foundBy && lines.length >= 2) {
+      title = lines.slice(0, Math.min(3, lines.length - 1)).join(' ').trim();
+      author = lines[Math.min(3, lines.length - 1)] || '';
+    }
+    
+  } else if (mode === 'spine') {
+    // Spine: usually author then title (or vice versa)
+    // Spines are harder - often just 2-3 words
+    if (lines.length >= 2) {
+      // Heuristic: shorter line is likely author, longer is title
+      const sorted = [...lines].sort((a, b) => b.length - a.length);
+      title = sorted[0];
+      author = sorted[1] || '';
+    } else if (lines.length === 1) {
+      title = lines[0];
+    }
+  }
+  
+  // Clean up
+  title = title.replace(/[^a-zA-Z0-9\s:,.'!?-]/g, '').trim();
+  author = author.replace(/[^a-zA-Z0-9\s.,']/g, '').trim();
+  
+  console.log('Extracted - Title:', title, 'Author:', author);
+  
+  return { title, author };
+}
+
+// Use OCR result and lookup book
+async function useOCRResult() {
+  if (!currentOcrData) return;
+  
+  ocrResultBox.style.display = 'none';
+  
+  showToast('🔍 Searching for book...');
+  
+  // Search Google Books by title and author
+  try {
+    const query = [];
+    if (currentOcrData.title) query.push(`intitle:${currentOcrData.title}`);
+    if (currentOcrData.author) query.push(`inauthor:${currentOcrData.author}`);
+    
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query.join('+'))}`;
+    console.log('Searching:', url);
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (!data.items || data.items.length === 0) {
+      showToast('❌ Book not found. Please enter details manually.');
+      // Pre-fill what we have
+      if (currentOcrData.title) document.getElementById('bookTitle').value = currentOcrData.title;
+      if (currentOcrData.author) document.getElementById('bookAuthor').value = currentOcrData.author;
+      return;
+    }
+    
+    // Use first result
+    const book = data.items[0].volumeInfo;
+    console.log('Found book:', book);
+    
+    // Fill in details
+    if (book.title) {
+      document.getElementById('bookTitle').value = book.title;
+    }
+    
+    if (book.authors && book.authors.length > 0) {
+      document.getElementById('bookAuthor').value = book.authors.join(', ');
+    }
+    
+    if (book.industryIdentifiers) {
+      const isbn13 = book.industryIdentifiers.find(id => id.type === 'ISBN_13');
+      const isbn10 = book.industryIdentifiers.find(id => id.type === 'ISBN_10');
+      if (isbn13) {
+        document.getElementById('bookISBN').value = isbn13.identifier;
+      } else if (isbn10) {
+        document.getElementById('bookISBN').value = isbn10.identifier;
+      }
+    }
+    
+    if (book.publishedDate) {
+      document.getElementById('bookPublicationDate').value = book.publishedDate;
+    }
+    
+    if (book.imageLinks && book.imageLinks.thumbnail) {
+      document.getElementById('bookCoverUrl').value = book.imageLinks.thumbnail.replace('http:', 'https:');
+    }
+    
+    // Try to classify from categories
+    if (book.categories && book.categories.length > 0) {
+      autoClassifyFromSubjects(book.categories.map(c => c.toLowerCase()));
+    }
+    
+    showToast('✅ Book found! Review and save.');
+    
+  } catch (error) {
+    console.error('Lookup error:', error);
+    showToast('❌ Could not find book. Please enter details manually.');
+    // Pre-fill what we have
+    if (currentOcrData.title) document.getElementById('bookTitle').value = currentOcrData.title;
+    if (currentOcrData.author) document.getElementById('bookAuthor').value = currentOcrData.author;
   }
 }
 
