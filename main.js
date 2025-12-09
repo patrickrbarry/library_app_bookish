@@ -624,20 +624,30 @@ async function handleBarcodeDetected(result) {
 
 // Lookup ISBN using Open Library API
 async function lookupISBN(isbn) {
-  showToast('Looking up book details...');
+  console.log('Looking up ISBN:', isbn);
+  showToast(`Looking up ISBN: ${isbn}...`);
   
   try {
     // Clean ISBN (remove hyphens, spaces)
     const cleanISBN = isbn.replace(/[^0-9X]/gi, '');
+    console.log('Clean ISBN:', cleanISBN);
     
     // Try Open Library API
-    const response = await fetch(`https://openlibrary.org/isbn/${cleanISBN}.json`);
+    const url = `https://openlibrary.org/isbn/${cleanISBN}.json`;
+    console.log('Fetching:', url);
+    
+    const response = await fetch(url);
+    console.log('Response status:', response.status);
     
     if (!response.ok) {
-      throw new Error('Book not found');
+      // Try alternate API - Google Books
+      console.log('Open Library failed, trying Google Books...');
+      await lookupGoogleBooks(cleanISBN);
+      return;
     }
     
     const data = await response.json();
+    console.log('Open Library data:', data);
     
     // Extract title
     if (data.title) {
@@ -655,6 +665,10 @@ async function lookupISBN(isbn) {
         }
       } catch (e) {
         console.error('Author fetch error:', e);
+        // If author fetch fails, try to get from publishers
+        if (data.by_statement) {
+          document.getElementById('bookAuthor').value = data.by_statement;
+        }
       }
     }
     
@@ -682,7 +696,59 @@ async function lookupISBN(isbn) {
     
   } catch (error) {
     console.error('ISBN lookup error:', error);
-    showToast('❌ Book not found in database. Please enter details manually.');
+    // Try Google Books as backup
+    console.log('Trying Google Books as backup...');
+    await lookupGoogleBooks(isbn.replace(/[^0-9X]/gi, ''));
+  }
+}
+
+// Backup lookup using Google Books API
+async function lookupGoogleBooks(isbn) {
+  try {
+    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+    console.log('Fetching Google Books:', url);
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    console.log('Google Books data:', data);
+    
+    if (!data.items || data.items.length === 0) {
+      throw new Error('Book not found in Google Books either');
+    }
+    
+    const book = data.items[0].volumeInfo;
+    
+    // Extract data
+    if (book.title) {
+      document.getElementById('bookTitle').value = book.title;
+    }
+    
+    if (book.authors && book.authors.length > 0) {
+      document.getElementById('bookAuthor').value = book.authors.join(', ');
+    }
+    
+    document.getElementById('bookISBN').value = isbn;
+    
+    if (book.publishedDate) {
+      document.getElementById('bookPublicationDate').value = book.publishedDate;
+    }
+    
+    if (book.imageLinks && book.imageLinks.thumbnail) {
+      document.getElementById('bookCoverUrl').value = book.imageLinks.thumbnail.replace('http:', 'https:');
+    }
+    
+    // Try to classify from categories
+    if (book.categories && book.categories.length > 0) {
+      autoClassifyFromSubjects(book.categories.map(c => c.toLowerCase()));
+    }
+    
+    showToast('✅ Book found (via Google Books)! Review and save.');
+    
+  } catch (error) {
+    console.error('Google Books lookup error:', error);
+    showToast('❌ Book not found. Please enter details manually.');
+    // Pre-fill ISBN at least
+    document.getElementById('bookISBN').value = isbn;
   }
 }
 
