@@ -61,11 +61,16 @@ const ocrCameraVideo = document.getElementById('ocrCameraVideo');
 const ocrCaptureBtn = document.getElementById('ocrCaptureBtn');
 const ocrCancelBtn = document.getElementById('ocrCancelBtn');
 const ocrResultBox = document.getElementById('ocrResultBox');
-const ocrExtractedText = document.getElementById('ocrExtractedText');
+const ocrLineSelector = document.getElementById('ocrLineSelector');
 const useOcrResultBtn = document.getElementById('useOcrResultBtn');
+const retryOcrBtn = document.getElementById('retryOcrBtn');
 
 let ocrStream = null;
-let currentOcrData = null;
+let ocrLines = [];
+let selectedLines = {
+  title: [],
+  author: []
+};
 
 // Initialize app
 function init() {
@@ -133,6 +138,10 @@ function setupEventListeners() {
   ocrCaptureBtn.addEventListener('click', captureAndProcessOCR);
   ocrCancelBtn.addEventListener('click', stopOCRCamera);
   useOcrResultBtn.addEventListener('click', useOCRResult);
+  retryOcrBtn.addEventListener('click', () => {
+    ocrResultBox.style.display = 'none';
+    startOCRCamera('title');
+  });
 
   // Import/Export listeners
   importBtn.addEventListener('click', handleImport);
@@ -891,23 +900,28 @@ async function captureAndProcessOCR() {
     
     console.log('OCR Raw text:', text);
     
-    // Extract title and author
-    const extracted = extractTitleAuthor(text, mode);
+    // Split into lines and clean
+    ocrLines = text
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 2) // Filter out very short lines
+      .filter(l => !/^[^a-zA-Z]*$/.test(l)); // Filter out lines with no letters
     
-    if (extracted.title || extracted.author) {
-      currentOcrData = extracted;
-      
-      // Show results
-      ocrExtractedText.innerHTML = `
-        ${extracted.title ? `<div><strong>Title:</strong> ${extracted.title}</div>` : ''}
-        ${extracted.author ? `<div><strong>Author:</strong> ${extracted.author}</div>` : ''}
-      `;
-      ocrResultBox.style.display = 'block';
-      
-      showToast('✅ Text extracted! Review and lookup.');
-    } else {
-      showToast('❌ Could not find title/author. Try again with better lighting.');
+    console.log('Cleaned lines:', ocrLines);
+    
+    if (ocrLines.length === 0) {
+      showToast('❌ Could not find readable text. Try again with better lighting.');
+      return;
     }
+    
+    // Reset selection
+    selectedLines = { title: [], author: [] };
+    
+    // Display interactive line selector
+    displayLineSelector();
+    
+    ocrResultBox.style.display = 'block';
+    showToast('✅ Text extracted! Select title and author lines.');
     
   } catch (error) {
     console.error('OCR error:', error);
@@ -915,84 +929,102 @@ async function captureAndProcessOCR() {
   }
 }
 
-// Extract title and author from OCR text
-function extractTitleAuthor(text, mode) {
-  console.log('Extracting from text:', text);
-  console.log('Mode:', mode);
+// Display interactive line selector
+function displayLineSelector() {
+  ocrLineSelector.innerHTML = '';
   
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  
-  let title = '';
-  let author = '';
-  
-  if (mode === 'title') {
-    // Title page: usually title is large text at top, author below
-    // Look for common patterns
-    const byPattern = /^by\s+(.+)$/i;
-    const authorKeywords = ['by', 'written by', 'author'];
+  ocrLines.forEach((line, index) => {
+    const lineDiv = document.createElement('div');
+    lineDiv.className = 'ocr-line';
+    lineDiv.dataset.index = index;
     
-    let foundBy = false;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      // Check if this is an author line
-      const byMatch = line.match(byPattern);
-      if (byMatch) {
-        author = byMatch[1].trim();
-        foundBy = true;
-        // Title is likely everything before this
-        if (!title && i > 0) {
-          title = lines.slice(0, i).join(' ').trim();
-        }
-        break;
-      }
-      
-      // Check for author keywords
-      const lowerLine = line.toLowerCase();
-      if (authorKeywords.some(kw => lowerLine.includes(kw))) {
-        author = line.replace(/^(by|written by|author):?\s*/i, '').trim();
-        foundBy = true;
-        if (!title && i > 0) {
-          title = lines.slice(0, i).join(' ').trim();
-        }
-        break;
-      }
+    // Line text
+    const textSpan = document.createElement('span');
+    textSpan.className = 'ocr-line-text';
+    textSpan.textContent = line;
+    
+    // Badges container
+    const badgesDiv = document.createElement('div');
+    badgesDiv.className = 'ocr-line-badges';
+    
+    // Title badge
+    const titleBadge = document.createElement('span');
+    titleBadge.className = 'ocr-badge ocr-badge-title';
+    titleBadge.textContent = 'Title';
+    titleBadge.onclick = (e) => {
+      e.stopPropagation();
+      toggleSelection(index, 'title');
+    };
+    
+    // Author badge
+    const authorBadge = document.createElement('span');
+    authorBadge.className = 'ocr-badge ocr-badge-author';
+    authorBadge.textContent = 'Author';
+    authorBadge.onclick = (e) => {
+      e.stopPropagation();
+      toggleSelection(index, 'author');
+    };
+    
+    badgesDiv.appendChild(titleBadge);
+    badgesDiv.appendChild(authorBadge);
+    
+    lineDiv.appendChild(textSpan);
+    lineDiv.appendChild(badgesDiv);
+    
+    ocrLineSelector.appendChild(lineDiv);
+  });
+}
+
+// Toggle line selection
+function toggleSelection(index, type) {
+  const line = ocrLines[index];
+  const lineDiv = ocrLineSelector.querySelector(`[data-index="${index}"]`);
+  
+  if (type === 'title') {
+    // Toggle title
+    const titleIndex = selectedLines.title.indexOf(index);
+    if (titleIndex > -1) {
+      selectedLines.title.splice(titleIndex, 1);
+      lineDiv.classList.remove('selected-title');
+      lineDiv.querySelector('.ocr-badge-title').classList.remove('active');
+    } else {
+      selectedLines.title.push(index);
+      lineDiv.classList.add('selected-title');
+      lineDiv.querySelector('.ocr-badge-title').classList.add('active');
     }
-    
-    // If no "by" found, assume first 1-3 lines are title, next line is author
-    if (!foundBy && lines.length >= 2) {
-      title = lines.slice(0, Math.min(3, lines.length - 1)).join(' ').trim();
-      author = lines[Math.min(3, lines.length - 1)] || '';
-    }
-    
-  } else if (mode === 'spine') {
-    // Spine: usually author then title (or vice versa)
-    // Spines are harder - often just 2-3 words
-    if (lines.length >= 2) {
-      // Heuristic: shorter line is likely author, longer is title
-      const sorted = [...lines].sort((a, b) => b.length - a.length);
-      title = sorted[0];
-      author = sorted[1] || '';
-    } else if (lines.length === 1) {
-      title = lines[0];
+  } else {
+    // Toggle author
+    const authorIndex = selectedLines.author.indexOf(index);
+    if (authorIndex > -1) {
+      selectedLines.author.splice(authorIndex, 1);
+      lineDiv.classList.remove('selected-author');
+      lineDiv.querySelector('.ocr-badge-author').classList.remove('active');
+    } else {
+      selectedLines.author.push(index);
+      lineDiv.classList.add('selected-author');
+      lineDiv.querySelector('.ocr-badge-author').classList.add('active');
     }
   }
   
-  // Clean up
-  title = title.replace(/[^a-zA-Z0-9\s:,.'!?-]/g, '').trim();
-  author = author.replace(/[^a-zA-Z0-9\s.,']/g, '').trim();
-  
-  console.log('Extracted - Title:', title, 'Author:', author);
-  
-  return { title, author };
+  console.log('Selected title lines:', selectedLines.title.map(i => ocrLines[i]));
+  console.log('Selected author lines:', selectedLines.author.map(i => ocrLines[i]));
 }
 
 // Use OCR result and lookup book
 async function useOCRResult() {
-  if (!currentOcrData) return;
+  // Build title and author from selected lines
+  const title = selectedLines.title.map(i => ocrLines[i]).join(' ').trim();
+  const author = selectedLines.author.map(i => ocrLines[i]).join(' ').trim();
+  
+  console.log('Combined title:', title);
+  console.log('Combined author:', author);
+  
+  if (!title && !author) {
+    alert('Please select at least a title or author line first!');
+    return;
+  }
   
   ocrResultBox.style.display = 'none';
-  
   showToast('🔍 Searching for book...');
   
   // Try multiple search strategies
@@ -1000,21 +1032,21 @@ async function useOCRResult() {
     let bookData = null;
     
     // Strategy 1: Search by title AND author (most specific)
-    if (currentOcrData.title && currentOcrData.author) {
+    if (title && author) {
       console.log('Strategy 1: Title + Author');
-      bookData = await searchGoogleBooks(currentOcrData.title, currentOcrData.author);
+      bookData = await searchGoogleBooks(title, author);
     }
     
     // Strategy 2: Search by title only (if strategy 1 failed)
-    if (!bookData && currentOcrData.title) {
+    if (!bookData && title) {
       console.log('Strategy 2: Title only');
-      bookData = await searchGoogleBooks(currentOcrData.title, null);
+      bookData = await searchGoogleBooks(title, null);
     }
     
     // Strategy 3: Search by author only (if strategy 2 failed)
-    if (!bookData && currentOcrData.author) {
+    if (!bookData && author) {
       console.log('Strategy 3: Author only');
-      bookData = await searchGoogleBooks(null, currentOcrData.author);
+      bookData = await searchGoogleBooks(null, author);
     }
     
     if (!bookData) {
@@ -1057,14 +1089,14 @@ async function useOCRResult() {
     
   } catch (error) {
     console.error('Lookup error:', error);
-    showToast('❌ Could not find book in database. Pre-filled what we extracted - please review.');
+    showToast('❌ Could not find book in database. Pre-filled what you selected - please review.');
     
-    // Pre-fill what we extracted from OCR
-    if (currentOcrData.title) {
-      document.getElementById('bookTitle').value = currentOcrData.title;
+    // Pre-fill what they selected
+    if (title) {
+      document.getElementById('bookTitle').value = title;
     }
-    if (currentOcrData.author) {
-      document.getElementById('bookAuthor').value = currentOcrData.author;
+    if (author) {
+      document.getElementById('bookAuthor').value = author;
     }
   }
 }
