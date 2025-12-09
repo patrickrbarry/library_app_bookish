@@ -50,9 +50,8 @@ const bookModalClose = document.getElementById('bookModalClose');
 const bookForm = document.getElementById('bookForm');
 const modalTitle = document.getElementById('modalTitle');
 const saveBookBtn = document.getElementById('saveBookBtn');
-const scanBarcodeBtn = document.getElementById('scanBarcodeBtn');
-const scanCoverBtn = document.getElementById('scanCoverBtn');
-const aiClassifyBtn = document.getElementById('aiClassifyBtn');
+const isbnLookupBtn = document.getElementById('isbnLookupBtn');
+const bookISBNLookup = document.getElementById('bookISBNLookup');
 
 // Initialize app
 function init() {
@@ -104,9 +103,7 @@ function setupEventListeners() {
   bookModalBackdrop.addEventListener('click', closeBookModal);
   bookModalClose.addEventListener('click', closeBookModal);
   bookForm.addEventListener('submit', handleSaveBook);
-  scanBarcodeBtn.addEventListener('click', handleScanBarcode);
-  scanCoverBtn.addEventListener('click', handleScanCover);
-  aiClassifyBtn.addEventListener('click', handleAIClassify);
+  isbnLookupBtn.addEventListener('click', handleISBNLookup);
 
   // Import/Export listeners
   importBtn.addEventListener('click', handleImport);
@@ -558,305 +555,126 @@ function showToast(message) {
   }, 3000);
 }
 
-// Handle barcode scanning
-async function handleScanBarcode() {
-  try {
-    // Check if browser supports camera
-    if (!('mediaDevices' in navigator) || !('getUserMedia' in navigator.mediaDevices)) {
-      alert('Camera access is not supported in your browser. Please enter book details manually.');
-      return;
-    }
-
-    showToast('Opening camera for barcode scanning...');
-    
-    // Request camera access
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment' } // Use back camera on mobile
-    });
-    
-    // Create video element for camera feed
-    const video = document.createElement('video');
-    video.srcObject = stream;
-    video.setAttribute('playsinline', true);
-    video.play();
-    
-    // Create canvas for capturing frame
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    
-    // Create a modal for camera view
-    const cameraModal = createCameraModal(video, async () => {
-      // Capture frame
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Stop camera
-      stream.getTracks().forEach(track => track.stop());
-      
-      // Convert to base64
-      const imageData = canvas.toDataURL('image/jpeg');
-      
-      // Close camera modal
-      document.body.removeChild(cameraModal);
-      
-      // Use Claude API to extract barcode/ISBN
-      await extractBookFromImage(imageData, 'barcode');
-    }, () => {
-      // Cancel - stop camera
-      stream.getTracks().forEach(track => track.stop());
-      document.body.removeChild(cameraModal);
-    });
-    
-    document.body.appendChild(cameraModal);
-    
-  } catch (error) {
-    console.error('Camera error:', error);
-    alert('Could not access camera. Please check permissions or enter book details manually.');
-  }
-}
-
-// Handle cover scanning (OCR)
-async function handleScanCover() {
-  try {
-    if (!('mediaDevices' in navigator) || !('getUserMedia' in navigator.mediaDevices)) {
-      alert('Camera access is not supported in your browser. Please enter book details manually.');
-      return;
-    }
-
-    showToast('Opening camera for cover scanning...');
-    
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment' }
-    });
-    
-    const video = document.createElement('video');
-    video.srcObject = stream;
-    video.setAttribute('playsinline', true);
-    video.play();
-    
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    
-    const cameraModal = createCameraModal(video, async () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      stream.getTracks().forEach(track => track.stop());
-      
-      const imageData = canvas.toDataURL('image/jpeg');
-      
-      document.body.removeChild(cameraModal);
-      
-      await extractBookFromImage(imageData, 'cover');
-    }, () => {
-      stream.getTracks().forEach(track => track.stop());
-      document.body.removeChild(cameraModal);
-    });
-    
-    document.body.appendChild(cameraModal);
-    
-  } catch (error) {
-    console.error('Camera error:', error);
-    alert('Could not access camera. Please check permissions or enter book details manually.');
-  }
-}
-
-// Create camera modal UI
-function createCameraModal(video, onCapture, onCancel) {
-  const modal = document.createElement('div');
-  modal.style.cssText = `
-    position: fixed;
-    inset: 0;
-    background: black;
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-  `;
+// Handle ISBN lookup using Open Library API
+async function handleISBNLookup() {
+  const isbn = bookISBNLookup.value.trim().replace(/[^0-9X]/gi, ''); // Remove non-ISBN characters
   
-  video.style.cssText = `
-    max-width: 100%;
-    max-height: 80vh;
-  `;
-  
-  const controls = document.createElement('div');
-  controls.style.cssText = `
-    position: absolute;
-    bottom: 2rem;
-    display: flex;
-    gap: 1rem;
-  `;
-  
-  const captureBtn = document.createElement('button');
-  captureBtn.textContent = '📸 Capture';
-  captureBtn.className = 'btn-primary';
-  captureBtn.style.cssText = 'padding: 1rem 2rem; font-size: 1.1rem; border-radius: 999px;';
-  captureBtn.onclick = onCapture;
-  
-  const cancelBtn = document.createElement('button');
-  cancelBtn.textContent = '✕ Cancel';
-  cancelBtn.className = 'btn-secondary';
-  cancelBtn.style.cssText = 'padding: 1rem 2rem; font-size: 1.1rem; border-radius: 999px;';
-  cancelBtn.onclick = onCancel;
-  
-  controls.appendChild(captureBtn);
-  controls.appendChild(cancelBtn);
-  
-  modal.appendChild(video);
-  modal.appendChild(controls);
-  
-  return modal;
-}
-
-// Extract book info from image using Claude API
-async function extractBookFromImage(imageData, type) {
-  showToast('Analyzing image with AI...');
-  
-  try {
-    const base64Data = imageData.split(',')[1];
-    
-    const prompt = type === 'barcode' 
-      ? 'Extract the ISBN or barcode number from this image. If you can identify the book, also provide the title and author.'
-      : 'Extract the book title and author from this book cover image. Be as accurate as possible.';
-    
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: 'image/jpeg',
-                data: base64Data
-              }
-            },
-            {
-              type: 'text',
-              text: prompt
-            }
-          ]
-        }]
-      })
-    });
-    
-    const data = await response.json();
-    const text = data.content[0].text;
-    
-    // Parse the response to extract title/author/ISBN
-    await populateBookFieldsFromAI(text, type);
-    
-  } catch (error) {
-    console.error('AI extraction error:', error);
-    showToast('Could not extract book info. Please enter manually.');
-  }
-}
-
-// Populate form fields from AI response
-async function populateBookFieldsFromAI(aiResponse, type) {
-  // Simple parsing - look for patterns like "Title: X" and "Author: Y"
-  const titleMatch = aiResponse.match(/(?:title|book)[:\s]+([^\n]+)/i);
-  const authorMatch = aiResponse.match(/(?:author|by)[:\s]+([^\n]+)/i);
-  const isbnMatch = aiResponse.match(/(?:ISBN|isbn)[:\s]*([\d-]+)/i);
-  
-  if (titleMatch) {
-    document.getElementById('bookTitle').value = titleMatch[1].trim();
-  }
-  
-  if (authorMatch) {
-    document.getElementById('bookAuthor').value = authorMatch[1].trim();
-  }
-  
-  if (isbnMatch) {
-    document.getElementById('bookISBN').value = isbnMatch[1].trim();
-  }
-  
-  if (titleMatch || authorMatch) {
-    showToast('Book info extracted! Review and save.');
-    
-    // Automatically trigger AI classification
-    if (titleMatch && authorMatch) {
-      await handleAIClassify();
-    }
-  } else {
-    showToast('Could not extract book info. Please enter manually.');
-  }
-}
-
-// Handle AI classification
-async function handleAIClassify() {
-  const title = document.getElementById('bookTitle').value.trim();
-  const author = document.getElementById('bookAuthor').value.trim();
-  
-  if (!title || !author) {
-    alert('Please enter title and author first.');
+  if (!isbn || (isbn.length !== 10 && isbn.length !== 13)) {
+    alert('Please enter a valid 10 or 13 digit ISBN');
     return;
   }
   
-  showToast('Classifying with AI...');
+  showToast('Looking up ISBN...');
+  isbnLookupBtn.disabled = true;
+  isbnLookupBtn.textContent = '⏳ Looking up...';
   
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 500,
-        messages: [{
-          role: 'user',
-          content: `For the book "${title}" by ${author}, provide:
-1. Genre (be specific, e.g., "Science Fiction", "Historical Fiction", "Literary Fiction", "Thriller", "Business", "History", "Science", "Philosophy", etc.)
-2. Fiction or Nonfiction
-3. Difficulty (Light, Moderate, or Dense)
-
-Respond in this exact format:
-Genre: [genre]
-Type: [Fiction or Nonfiction]
-Difficulty: [Light/Moderate/Dense]`
-        }]
-      })
-    });
+    // Try Open Library API first
+    const response = await fetch(`https://openlibrary.org/isbn/${isbn}.json`);
+    
+    if (!response.ok) {
+      throw new Error('Book not found');
+    }
     
     const data = await response.json();
-    const text = data.content[0].text;
     
-    // Parse response
-    const genreMatch = text.match(/Genre[:\s]+([^\n]+)/i);
-    const typeMatch = text.match(/Type[:\s]+([^\n]+)/i);
-    const difficultyMatch = text.match(/Difficulty[:\s]+([^\n]+)/i);
-    
-    if (genreMatch) {
-      document.getElementById('bookGenre').value = genreMatch[1].trim();
+    // Extract title
+    if (data.title) {
+      document.getElementById('bookTitle').value = data.title;
     }
     
-    if (typeMatch) {
-      const type = typeMatch[1].trim();
-      document.getElementById('bookFictionType').value = type.includes('Nonfiction') ? 'Nonfiction' : 'Fiction';
+    // Get author info
+    if (data.authors && data.authors.length > 0) {
+      const authorKey = data.authors[0].key;
+      const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`);
+      const authorData = await authorResponse.json();
+      if (authorData.name) {
+        document.getElementById('bookAuthor').value = authorData.name;
+      }
     }
     
-    if (difficultyMatch) {
-      document.getElementById('bookDifficulty').value = difficultyMatch[1].trim();
+    // Set ISBN
+    document.getElementById('bookISBN').value = isbn;
+    
+    // Get publication date
+    if (data.publish_date) {
+      document.getElementById('bookPublicationDate').value = data.publish_date;
     }
     
-    showToast('Book classified successfully!');
+    // Get cover URL
+    if (data.covers && data.covers.length > 0) {
+      const coverId = data.covers[0];
+      document.getElementById('bookCoverUrl').value = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+    }
+    
+    // Try to get subjects for genre classification
+    if (data.subjects && data.subjects.length > 0) {
+      const subjects = data.subjects.map(s => s.toLowerCase());
+      autoClassifyFromSubjects(subjects);
+    }
+    
+    showToast('✅ Book found! Review and save.');
     
   } catch (error) {
-    console.error('AI classification error:', error);
-    showToast('Could not classify book. Please enter manually.');
+    console.error('ISBN lookup error:', error);
+    showToast('Book not found. Try entering details manually.');
+  } finally {
+    isbnLookupBtn.disabled = false;
+    isbnLookupBtn.textContent = '🔍 Lookup';
+  }
+}
+
+// Auto-classify based on Open Library subjects
+function autoClassifyFromSubjects(subjects) {
+  const subjectStr = subjects.join(' ');
+  
+  // Fiction vs Nonfiction detection
+  if (subjects.includes('fiction') || subjects.includes('novel')) {
+    document.getElementById('bookFictionType').value = 'Fiction';
+    
+    // Genre detection for fiction
+    if (subjectStr.includes('science fiction') || subjectStr.includes('sci-fi')) {
+      document.getElementById('bookGenre').value = 'Science Fiction';
+    } else if (subjectStr.includes('fantasy')) {
+      document.getElementById('bookGenre').value = 'Fantasy';
+    } else if (subjectStr.includes('mystery') || subjectStr.includes('detective')) {
+      document.getElementById('bookGenre').value = 'Mystery';
+    } else if (subjectStr.includes('thriller') || subjectStr.includes('suspense')) {
+      document.getElementById('bookGenre').value = 'Thriller';
+    } else if (subjectStr.includes('romance')) {
+      document.getElementById('bookGenre').value = 'Romance';
+    } else if (subjectStr.includes('historical')) {
+      document.getElementById('bookGenre').value = 'Historical Fiction';
+    } else if (subjectStr.includes('horror')) {
+      document.getElementById('bookGenre').value = 'Horror';
+    } else {
+      document.getElementById('bookGenre').value = 'Literary Fiction';
+    }
+    
+  } else {
+    document.getElementById('bookFictionType').value = 'Nonfiction';
+    
+    // Genre detection for nonfiction
+    if (subjectStr.includes('history')) {
+      document.getElementById('bookGenre').value = 'History';
+    } else if (subjectStr.includes('biography') || subjectStr.includes('memoir')) {
+      document.getElementById('bookGenre').value = 'Biography';
+    } else if (subjectStr.includes('science')) {
+      document.getElementById('bookGenre').value = 'Science';
+    } else if (subjectStr.includes('philosophy')) {
+      document.getElementById('bookGenre').value = 'Philosophy';
+    } else if (subjectStr.includes('business') || subjectStr.includes('management')) {
+      document.getElementById('bookGenre').value = 'Business';
+    } else if (subjectStr.includes('self-help') || subjectStr.includes('self help')) {
+      document.getElementById('bookGenre').value = 'Self-Help';
+    } else if (subjectStr.includes('psychology')) {
+      document.getElementById('bookGenre').value = 'Psychology';
+    }
+  }
+  
+  // Default difficulty to Moderate (user can adjust)
+  if (!document.getElementById('bookDifficulty').value) {
+    document.getElementById('bookDifficulty').value = 'Moderate';
   }
 }
 
