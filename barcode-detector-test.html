@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Barcode Detector Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: system-ui;
+      padding: 20px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    video {
+      width: 100%;
+      max-width: 400px;
+      border: 2px solid #333;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px 5px;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f0f0f0;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Barcode Detector Test</h1>
+  
+  <div id="status"></div>
+  
+  <button id="testBtn">Start Barcode Scan</button>
+  
+  <div id="videoContainer" style="display:none;">
+    <video id="video" autoplay playsinline></video>
+    <button id="stopBtn">Stop</button>
+  </div>
+  
+  <div id="result" class="result" style="display:none;"></div>
+  
+  <script>
+    const status = document.getElementById('status');
+    const testBtn = document.getElementById('testBtn');
+    const videoContainer = document.getElementById('videoContainer');
+    const video = document.getElementById('video');
+    const stopBtn = document.getElementById('stopBtn');
+    const resultDiv = document.getElementById('result');
+    
+    // Check if BarcodeDetector is available
+    if ('BarcodeDetector' in window) {
+      status.innerHTML = '✅ <strong>BarcodeDetector is available!</strong><br>This device supports native barcode scanning.';
+      status.style.color = 'green';
+      
+      testBtn.addEventListener('click', startScan);
+    } else {
+      status.innerHTML = '❌ <strong>BarcodeDetector not available</strong><br>This browser does not support native barcode scanning.<br><br>Supported in:<br>- Chrome 83+<br>- Edge 83+<br>- Samsung Internet 14+<br><br>Not supported in Safari (as of iOS 17)';
+      status.style.color = 'red';
+      testBtn.disabled = true;
+    }
+    
+    let stream = null;
+    let scanning = false;
+    
+    async function startScan() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
+        
+        video.srcObject = stream;
+        videoContainer.style.display = 'block';
+        testBtn.style.display = 'none';
+        
+        const barcodeDetector = new BarcodeDetector({
+          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e']
+        });
+        
+        scanning = true;
+        scanFrame(barcodeDetector);
+        
+      } catch (error) {
+        alert('Camera error: ' + error.message);
+      }
+    }
+    
+    async function scanFrame(detector) {
+      if (!scanning) return;
+      
+      try {
+        const barcodes = await detector.detect(video);
+        
+        if (barcodes.length > 0) {
+          const barcode = barcodes[0];
+          resultDiv.innerHTML = `
+            <strong>✅ Barcode Detected!</strong><br>
+            Format: ${barcode.format}<br>
+            Value: <strong>${barcode.rawValue}</strong><br>
+            <small>Detected at: ${new Date().toLocaleTimeString()}</small>
+          `;
+          resultDiv.style.display = 'block';
+          resultDiv.style.background = '#d4edda';
+          resultDiv.style.color = '#155724';
+          
+          // Stop scanning after detection
+          scanning = false;
+          stopScan();
+          return;
+        }
+        
+        // Continue scanning
+        requestAnimationFrame(() => scanFrame(detector));
+        
+      } catch (error) {
+        console.error('Detection error:', error);
+        requestAnimationFrame(() => scanFrame(detector));
+      }
+    }
+    
+    function stopScan() {
+      scanning = false;
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      videoContainer.style.display = 'none';
+      testBtn.style.display = 'block';
+    }
+    
+    stopBtn.addEventListener('click', stopScan);
+  </script>
+</body>
+</html>
