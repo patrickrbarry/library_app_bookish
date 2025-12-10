@@ -165,9 +165,11 @@ function applyFilters() {
   const genreVal = genreFilter.value;
   const statusVal = statusFilter.value;
   
-  const wantAudible = formatCheckboxes.audible.checked;
-  const wantKindle = formatCheckboxes.kindle.checked;
-  const wantPhysical = formatCheckboxes.physical.checked;
+  const wantAudible = formatCheckboxes.audible?.checked || false;
+  const wantKindle = formatCheckboxes.kindle?.checked || false;
+  const wantPhysical = formatCheckboxes.physical?.checked || false;
+  
+  console.log('Format filters:', { wantAudible, wantKindle, wantPhysical });
 
   let filtered = books.filter(book => {
     // Search term
@@ -398,8 +400,11 @@ function buildAmazonUrl(book) {
 
 // Open book modal (add or edit)
 function openBookModal(book = null) {
+  console.log('openBookModal called with book:', book);
+  
   if (book) {
     // Edit mode
+    console.log('Edit mode - book ID:', book.id);
     modalTitle.textContent = 'Edit Book';
     document.getElementById('bookTitle').value = book.title || '';
     document.getElementById('bookAuthor').value = book.author || '';
@@ -419,6 +424,7 @@ function openBookModal(book = null) {
     bookForm.dataset.editId = book.id;
   } else {
     // Add mode
+    console.log('Add mode');
     modalTitle.textContent = 'Add New Book';
     bookForm.reset();
     delete bookForm.dataset.editId;
@@ -486,7 +492,11 @@ function handleSaveBook(e) {
 
 // Handle edit book button
 function handleEditBook() {
-  if (!currentDetailBook) return;
+  console.log('Edit button clicked, currentDetailBook:', currentDetailBook);
+  if (!currentDetailBook) {
+    console.error('No currentDetailBook set!');
+    return;
+  }
   closeDetail();
   openBookModal(currentDetailBook);
 }
