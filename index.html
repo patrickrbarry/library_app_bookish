@@ -1219,8 +1219,12 @@
   <div id="barcodeCamera" style="position: fixed; inset: 0; background: black; z-index: 2000; display: none; flex-direction: column; align-items: center; justify-content: center;">
     <video id="barcodeCameraVideo" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
     
+    <!-- Focus indicator (appears on tap) -->
+    <div id="focusIndicator" style="position: absolute; width: 80px; height: 80px; border: 2px solid #4ade80; border-radius: 50%; display: none; pointer-events: none; animation: focusPulse 0.6s ease-out;">
+    </div>
+    
     <!-- Scanning overlay with larger frame -->
-    <div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none;">
+    <div id="scannerOverlay" style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;">
       <!-- Large scanning rectangle -->
       <div style="width: 90%; max-width: 500px; height: 200px; border: 4px solid #4ade80; border-radius: 1rem; box-shadow: 0 0 0 9999px rgba(0,0,0,0.6); position: relative;">
         <!-- Scanning line animation -->
@@ -1233,9 +1237,9 @@
       </div>
       
       <!-- Status message -->
-      <div id="barcodeScanStatus" style="margin-top: 2rem; color: white; font-size: 1.1rem; font-weight: 600; text-align: center; pointer-events: auto; background: rgba(0,0,0,0.8); padding: 1.25rem 2rem; border-radius: 0.75rem; max-width: 90%;">
+      <div id="barcodeScanStatus" style="margin-top: 2rem; color: white; font-size: 1.1rem; font-weight: 600; text-align: center; pointer-events: none; background: rgba(0,0,0,0.8); padding: 1.25rem 2rem; border-radius: 0.75rem; max-width: 90%;">
         <div style="font-size: 1.3rem; margin-bottom: 0.5rem;">📷 Position barcode in frame</div>
-        <div style="font-size: 0.9rem; font-weight: 400; color: #a0a0a0;">Hold steady • Scan happens automatically</div>
+        <div style="font-size: 0.9rem; font-weight: 400; color: #a0a0a0;">Tap screen to focus • Hold steady</div>
       </div>
       
       <!-- Can't scan? Manual entry link -->
@@ -1245,15 +1249,20 @@
     </div>
     
     <!-- Cancel button -->
-    <div style="position: absolute; bottom: 2rem; pointer-events: auto;">
+    <div style="position: absolute; bottom: 2rem; pointer-events: auto; z-index: 10;">
       <button id="barcodeCancelBtn" style="padding: 1rem 2rem; background: rgba(220, 38, 38, 0.9); color: white; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer;">✕ Cancel</button>
     </div>
     
-    <!-- Scanning animation CSS -->
+    <!-- CSS Animations -->
     <style>
       @keyframes scan {
         0%, 100% { top: 0; opacity: 0; }
         50% { top: calc(100% - 3px); opacity: 1; }
+      }
+      @keyframes focusPulse {
+        0% { transform: scale(1.5); opacity: 0; }
+        50% { opacity: 1; }
+        100% { transform: scale(1); opacity: 0; }
       }
     </style>
   </div>
