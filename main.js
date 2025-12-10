@@ -960,7 +960,7 @@ async function scanBarcodeFrame() {
   }
 }
 
-// Lookup ISBN using Open Library API
+// Lookup ISBN using multiple APIs with fallbacks
 async function lookupISBN(isbn) {
   console.log('=== ISBN LOOKUP START ===');
   console.log('Original ISBN:', isbn);
@@ -971,101 +971,50 @@ async function lookupISBN(isbn) {
     const cleanISBN = isbn.replace(/[^0-9X]/gi, '');
     console.log('Clean ISBN:', cleanISBN, 'Length:', cleanISBN.length);
     
-    // If ISBN-10, try to convert to ISBN-13
+    // If ISBN-10, convert to ISBN-13
     let isbn13 = cleanISBN;
     if (cleanISBN.length === 10) {
       isbn13 = convertISBN10to13(cleanISBN);
       console.log('Converted ISBN-10 to ISBN-13:', isbn13);
     }
     
-    // Try both ISBN-13 and ISBN-10
+    // Try multiple APIs in order of reliability
     const isbnsToTry = cleanISBN.length === 10 ? [isbn13, cleanISBN] : [cleanISBN];
     
+    // 1. Try Google Books first (most comprehensive)
     for (const isbnToTry of isbnsToTry) {
-      console.log('Trying ISBN:', isbnToTry);
-      
-      // Try Open Library API
-      const url = `https://openlibrary.org/isbn/${isbnToTry}.json`;
-      console.log('Fetching:', url);
-      
-      const response = await fetch(url);
-      console.log('Response status:', response.status);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('✅ Open Library SUCCESS! Data:', data);
-        
-        // Extract title
-        if (data.title) {
-          document.getElementById('bookTitle').value = data.title;
-        }
-        
-        // Get author info
-        if (data.authors && data.authors.length > 0) {
-          try {
-            const authorKey = data.authors[0].key;
-            const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`);
-            const authorData = await authorResponse.json();
-            if (authorData.name) {
-              document.getElementById('bookAuthor').value = authorData.name;
-            }
-          } catch (e) {
-            console.error('Author fetch error:', e);
-            if (data.by_statement) {
-              document.getElementById('bookAuthor').value = data.by_statement;
-            }
-          }
-        }
-        
-        // Set ISBN
-        document.getElementById('bookISBN').value = isbnToTry;
-        
-        // Get publication date
-        if (data.publish_date) {
-          document.getElementById('bookPublicationDate').value = data.publish_date;
-        }
-        
-        // Get cover URL
-        if (data.covers && data.covers.length > 0) {
-          const coverId = data.covers[0];
-          document.getElementById('bookCoverUrl').value = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
-        }
-        
-        // Try to get subjects for genre classification
-        if (data.subjects && data.subjects.length > 0) {
-          const subjects = data.subjects.map(s => s.toLowerCase());
-          autoClassifyFromSubjects(subjects);
-        }
-        
-        showToast('✅ Book found! Review and save.');
-        return; // Success!
+      console.log('Trying Google Books with ISBN:', isbnToTry);
+      const googleResult = await tryGoogleBooks(isbnToTry);
+      if (googleResult) {
+        console.log('✅ Google Books SUCCESS!');
+        return;
       }
     }
     
-    // If Open Library failed, try Google Books
-    console.log('Open Library failed for all ISBNs, trying Google Books...');
-    await lookupGoogleBooks(isbn13 || cleanISBN);
+    // 2. Try Open Library as backup
+    for (const isbnToTry of isbnsToTry) {
+      console.log('Trying Open Library with ISBN:', isbnToTry);
+      const openLibResult = await tryOpenLibrary(isbnToTry);
+      if (openLibResult) {
+        console.log('✅ Open Library SUCCESS!');
+        return;
+      }
+    }
+    
+    // 3. All APIs failed
+    console.log('=== ALL LOOKUPS FAILED ===');
+    showToast(`❌ ISBN ${cleanISBN} not found in any database. Enter details manually.`);
+    document.getElementById('bookISBN').value = cleanISBN;
     
   } catch (error) {
     console.error('ISBN lookup error:', error);
-    console.log('Error occurred, trying Google Books as backup...');
-    await lookupGoogleBooks(isbn.replace(/[^0-9X]/gi, ''));
+    showToast(`❌ Lookup error. Enter details manually.`);
+    document.getElementById('bookISBN').value = isbn.replace(/[^0-9X]/gi, '');
   }
 }
 
-// Convert ISBN-10 to ISBN-13
-function convertISBN10to13(isbn10) {
-  const base = '978' + isbn10.substring(0, 9);
-  let sum = 0;
-  for (let i = 0; i < 12; i++) {
-    sum += parseInt(base[i]) * (i % 2 === 0 ? 1 : 3);
-  }
-  const checkDigit = (10 - (sum % 10)) % 10;
-  return base + checkDigit;
-}
-
-// Backup lookup using Google Books API
-async function lookupGoogleBooks(isbn) {
+// Try Google Books API (most comprehensive)
+async function tryGoogleBooks(isbn) {
   try {
     const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
     console.log('Fetching Google Books:', url);
@@ -1075,11 +1024,11 @@ async function lookupGoogleBooks(isbn) {
     console.log('Google Books response:', data);
     
     if (!data.items || data.items.length === 0) {
-      throw new Error('Book not found in Google Books either');
+      return false;
     }
     
     const book = data.items[0].volumeInfo;
-    console.log('✅ Google Books SUCCESS! Book:', book);
+    console.log('✅ Google Books found book:', book);
     
     // Extract data
     if (book.title) {
@@ -1105,14 +1054,90 @@ async function lookupGoogleBooks(isbn) {
       autoClassifyFromSubjects(book.categories.map(c => c.toLowerCase()));
     }
     
-    showToast('✅ Book found (Google Books)! Review and save.');
+    showToast('✅ Book found! Review and save.');
+    return true;
     
   } catch (error) {
-    console.error('Google Books lookup error:', error);
-    console.log('=== LOOKUP FAILED - Book not in any database ===');
-    showToast(`❌ ISBN ${isbn} not found. Enter details manually.`);
-    document.getElementById('bookISBN').value = isbn;
+    console.error('Google Books error:', error);
+    return false;
   }
+}
+
+// Try Open Library API
+async function tryOpenLibrary(isbn) {
+  try {
+    const url = `https://openlibrary.org/isbn/${isbn}.json`;
+    console.log('Fetching Open Library:', url);
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      return false;
+    }
+    
+    const data = await response.json();
+    console.log('✅ Open Library found book:', data);
+    
+    // Extract title
+    if (data.title) {
+      document.getElementById('bookTitle').value = data.title;
+    }
+    
+    // Get author info
+    if (data.authors && data.authors.length > 0) {
+      try {
+        const authorKey = data.authors[0].key;
+        const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`);
+        const authorData = await authorResponse.json();
+        if (authorData.name) {
+          document.getElementById('bookAuthor').value = authorData.name;
+        }
+      } catch (e) {
+        console.error('Author fetch error:', e);
+        if (data.by_statement) {
+          document.getElementById('bookAuthor').value = data.by_statement;
+        }
+      }
+    }
+    
+    // Set ISBN
+    document.getElementById('bookISBN').value = isbn;
+    
+    // Get publication date
+    if (data.publish_date) {
+      document.getElementById('bookPublicationDate').value = data.publish_date;
+    }
+    
+    // Get cover URL
+    if (data.covers && data.covers.length > 0) {
+      const coverId = data.covers[0];
+      document.getElementById('bookCoverUrl').value = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+    }
+    
+    // Try to get subjects for genre classification
+    if (data.subjects && data.subjects.length > 0) {
+      const subjects = data.subjects.map(s => s.toLowerCase());
+      autoClassifyFromSubjects(subjects);
+    }
+    
+    showToast('✅ Book found! Review and save.');
+    return true;
+    
+  } catch (error) {
+    console.error('Open Library error:', error);
+    return false;
+  }
+}
+
+// Convert ISBN-10 to ISBN-13
+function convertISBN10to13(isbn10) {
+  const base = '978' + isbn10.substring(0, 9);
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(base[i]) * (i % 2 === 0 ? 1 : 3);
+  }
+  const checkDigit = (10 - (sum % 10)) % 10;
+  return base + checkDigit;
 }
 
 // ============================================================
