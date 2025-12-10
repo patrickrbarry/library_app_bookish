@@ -71,11 +71,14 @@ const barcodeCameraVideo = document.getElementById('barcodeCameraVideo');
 const barcodeScanStatus = document.getElementById('barcodeScanStatus');
 const barcodeCancelBtn = document.getElementById('barcodeCancelBtn');
 const barcodeManualEntryBtn = document.getElementById('barcodeManualEntryBtn');
+const focusIndicator = document.getElementById('focusIndicator');
+const scannerOverlay = document.getElementById('scannerOverlay');
 
 let ocrStream = null;
 let barcodeStream = null;
 let barcodeScanning = false;
 let barcodeScanAttempts = 0;
+let videoTrack = null;
 let ocrLines = [];
 let selectedLines = {
   title: [],
@@ -888,24 +891,35 @@ async function startBarcodeScanner() {
   try {
     barcodeScanAttempts = 0;
     
+    // Request camera with advanced constraints for better focus
     barcodeStream = await navigator.mediaDevices.getUserMedia({
       video: { 
         facingMode: 'environment',
         width: { ideal: 1920 },
-        height: { ideal: 1080 }
+        height: { ideal: 1080 },
+        focusMode: 'continuous', // Continuous autofocus
+        focusDistance: { ideal: 0.3 } // Close-up focus (30cm)
       }
     });
     
     barcodeCameraVideo.srcObject = barcodeStream;
     barcodeCamera.style.display = 'flex';
     
+    // Get video track for focus control
+    videoTrack = barcodeStream.getVideoTracks()[0];
+    
     // Wait for video to be ready
     await new Promise(resolve => {
       barcodeCameraVideo.onloadedmetadata = resolve;
     });
     
+    // Add tap-to-focus handler
+    scannerOverlay.addEventListener('click', handleTapToFocus);
+    
     barcodeScanning = true;
     scanBarcodeFrame();
+    
+    console.log('Camera capabilities:', videoTrack.getCapabilities());
     
   } catch (error) {
     console.error('Camera error:', error);
@@ -913,16 +927,72 @@ async function startBarcodeScanner() {
   }
 }
 
+// Handle tap-to-focus
+async function handleTapToFocus(event) {
+  if (!videoTrack) return;
+  
+  // Get tap coordinates relative to video
+  const rect = barcodeCameraVideo.getBoundingClientRect();
+  const x = (event.clientX - rect.left) / rect.width;
+  const y = (event.clientY - rect.top) / rect.height;
+  
+  // Show focus indicator at tap location
+  focusIndicator.style.left = event.clientX - 40 + 'px';
+  focusIndicator.style.top = event.clientY - 40 + 'px';
+  focusIndicator.style.display = 'block';
+  
+  setTimeout(() => {
+    focusIndicator.style.display = 'none';
+  }, 600);
+  
+  // Try to set focus point
+  try {
+    const capabilities = videoTrack.getCapabilities();
+    const settings = {};
+    
+    // If focusMode is supported, set it to manual
+    if (capabilities.focusMode && capabilities.focusMode.includes('manual')) {
+      settings.focusMode = 'manual';
+    }
+    
+    // If advanced constraints are supported, set focus point
+    if (capabilities.pointsOfInterest) {
+      settings.pointsOfInterest = [{x, y}];
+    }
+    
+    // Apply constraints if we have any
+    if (Object.keys(settings).length > 0) {
+      await videoTrack.applyConstraints({ advanced: [settings] });
+      console.log('Focus applied at:', x, y);
+    } else {
+      // Fallback: try to trigger autofocus by briefly changing focus mode
+      if (capabilities.focusMode) {
+        await videoTrack.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] });
+        console.log('Triggered autofocus');
+      }
+    }
+    
+  } catch (error) {
+    console.log('Focus control not available:', error);
+    // Even if focus control fails, the visual feedback helps user know to hold steady
+  }
+}
+
 // Stop barcode scanner
 function stopBarcodeScanner() {
   barcodeScanning = false;
   barcodeScanAttempts = 0;
+  videoTrack = null;
+  
+  // Remove tap-to-focus handler
+  scannerOverlay.removeEventListener('click', handleTapToFocus);
+  
   if (barcodeStream) {
     barcodeStream.getTracks().forEach(track => track.stop());
     barcodeStream = null;
   }
   barcodeCamera.style.display = 'none';
-  barcodeScanStatus.innerHTML = '<div style="font-size: 1.3rem; margin-bottom: 0.5rem;">📷 Position barcode in frame</div><div style="font-size: 0.9rem; font-weight: 400; color: #a0a0a0;">Hold steady • Scan happens automatically</div>';
+  barcodeScanStatus.innerHTML = '<div style="font-size: 1.3rem; margin-bottom: 0.5rem;">📷 Position barcode in frame</div><div style="font-size: 0.9rem; font-weight: 400; color: #a0a0a0;">Tap screen to focus • Hold steady</div>';
 }
 
 // Scan barcode using ZXing
