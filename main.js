@@ -70,10 +70,12 @@ const barcodeCamera = document.getElementById('barcodeCamera');
 const barcodeCameraVideo = document.getElementById('barcodeCameraVideo');
 const barcodeScanStatus = document.getElementById('barcodeScanStatus');
 const barcodeCancelBtn = document.getElementById('barcodeCancelBtn');
+const barcodeManualEntryBtn = document.getElementById('barcodeManualEntryBtn');
 
 let ocrStream = null;
 let barcodeStream = null;
 let barcodeScanning = false;
+let barcodeScanAttempts = 0;
 let ocrLines = [];
 let selectedLines = {
   title: [],
@@ -147,6 +149,13 @@ function setupEventListeners() {
   ocrCancelBtn.addEventListener('click', stopOCRCamera);
   useOcrResultBtn.addEventListener('click', useOCRResult);
   barcodeCancelBtn.addEventListener('click', stopBarcodeScanner);
+  barcodeManualEntryBtn.addEventListener('click', () => {
+    stopBarcodeScanner();
+    const isbn = prompt('Enter ISBN (10 or 13 digits):');
+    if (isbn && isbn.trim()) {
+      lookupISBN(isbn.trim());
+    }
+  });
   retryOcrBtn.addEventListener('click', () => {
     ocrResultBox.style.display = 'none';
     startOCRCamera('title');
@@ -877,8 +886,14 @@ function autoClassifyFromSubjects(subjects) {
 // Start ZXing barcode scanner
 async function startBarcodeScanner() {
   try {
+    barcodeScanAttempts = 0;
+    
     barcodeStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      video: { 
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      }
     });
     
     barcodeCameraVideo.srcObject = barcodeStream;
@@ -894,29 +909,46 @@ async function startBarcodeScanner() {
     
   } catch (error) {
     console.error('Camera error:', error);
-    alert('Could not access camera. Please check permissions.');
+    alert('Could not access camera. Please check permissions in Settings → Safari → Camera.');
   }
 }
 
 // Stop barcode scanner
 function stopBarcodeScanner() {
   barcodeScanning = false;
+  barcodeScanAttempts = 0;
   if (barcodeStream) {
     barcodeStream.getTracks().forEach(track => track.stop());
     barcodeStream = null;
   }
   barcodeCamera.style.display = 'none';
+  barcodeScanStatus.innerHTML = '<div style="font-size: 1.3rem; margin-bottom: 0.5rem;">📷 Position barcode in frame</div><div style="font-size: 0.9rem; font-weight: 400; color: #a0a0a0;">Hold steady • Scan happens automatically</div>';
 }
 
 // Scan barcode using ZXing
 async function scanBarcodeFrame() {
   if (!barcodeScanning) return;
   
+  barcodeScanAttempts++;
+  
+  // Update status every 10 attempts
+  if (barcodeScanAttempts % 10 === 0) {
+    const seconds = Math.floor(barcodeScanAttempts / 10);
+    barcodeScanStatus.innerHTML = `<div style="font-size: 1.1rem;">🔍 Scanning... (${seconds}s)</div><div style="font-size: 0.85rem; margin-top: 0.5rem; color: #a0a0a0;">Make sure barcode is in frame</div>`;
+  }
+  
   try {
     const codeReader = new ZXing.BrowserMultiFormatReader();
     
-    // Try to decode from video
-    const result = await codeReader.decodeOnceFromVideoDevice(undefined, barcodeCameraVideo);
+    // Create canvas from video frame
+    const canvas = document.createElement('canvas');
+    canvas.width = barcodeCameraVideo.videoWidth;
+    canvas.height = barcodeCameraVideo.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(barcodeCameraVideo, 0, 0);
+    
+    // Try to decode from canvas
+    const result = await codeReader.decodeFromImageElement(canvas);
     
     if (result && result.text) {
       console.log('✅ Barcode detected:', result.text, 'Format:', result.format);
@@ -925,37 +957,32 @@ async function scanBarcodeFrame() {
       
       // Validate ISBN length
       if (isbn.length === 10 || isbn.length === 13) {
-        // Check if it starts with 978 or 979 (valid ISBN-13 prefix)
+        // Check if it starts with 978 or 979 (valid ISBN-13 prefix) or is ISBN-10
         const isValidISBN = isbn.length === 10 || 
                            (isbn.length === 13 && (isbn.startsWith('978') || isbn.startsWith('979')));
         
         if (isValidISBN) {
-          barcodeScanStatus.textContent = '✅ ISBN Found: ' + isbn;
-          barcodeScanStatus.style.background = 'rgba(74, 222, 128, 0.9)';
+          barcodeScanStatus.innerHTML = '<div style="font-size: 1.3rem; color: #4ade80;">✅ ISBN Found!</div><div style="font-size: 1rem; margin-top: 0.5rem;">' + isbn + '</div>';
           
           setTimeout(() => {
             stopBarcodeScanner();
-            showToast(`📖 ISBN detected: ${isbn}`);
             lookupISBN(isbn);
-          }, 500);
+          }, 800);
           return;
         }
       }
       
-      // Not a valid ISBN, keep scanning
-      barcodeScanStatus.textContent = 'Not an ISBN barcode, keep scanning...';
-      barcodeScanStatus.style.background = 'rgba(239, 68, 68, 0.9)';
+      // Not a valid ISBN, show feedback
+      barcodeScanStatus.innerHTML = '<div style="font-size: 1.1rem; color: #ef4444;">⚠️ Not an ISBN</div><div style="font-size: 0.85rem; margin-top: 0.5rem;">Found: ' + result.text + '</div><div style="font-size: 0.85rem; color: #a0a0a0;">Looking for more barcodes...</div>';
       setTimeout(() => {
-        barcodeScanStatus.textContent = 'Point camera at ISBN barcode';
-        barcodeScanStatus.style.background = 'rgba(0,0,0,0.7)';
         if (barcodeScanning) scanBarcodeFrame();
-      }, 1500);
+      }, 1000);
     }
     
   } catch (error) {
     // No barcode found in this frame, try again
     if (barcodeScanning) {
-      setTimeout(() => scanBarcodeFrame(), 100);
+      setTimeout(() => scanBarcodeFrame(), 200);
     }
   }
 }
@@ -1003,13 +1030,20 @@ async function lookupISBN(isbn) {
     
     // 3. All APIs failed
     console.log('=== ALL LOOKUPS FAILED ===');
-    showToast(`❌ ISBN ${cleanISBN} not found in any database. Enter details manually.`);
+    showToast(`❌ ISBN ${cleanISBN} not in any database. Filling ISBN field - please enter title and author manually.`, 6000);
     document.getElementById('bookISBN').value = cleanISBN;
+    
+    // Show a helpful message in the title field
+    document.getElementById('bookTitle').placeholder = 'Book not found - enter title manually';
+    document.getElementById('bookAuthor').placeholder = 'Enter author manually';
     
   } catch (error) {
     console.error('ISBN lookup error:', error);
-    showToast(`❌ Lookup error. Enter details manually.`);
-    document.getElementById('bookISBN').value = isbn.replace(/[^0-9X]/gi, '');
+    showToast(`❌ Lookup error. ISBN saved - enter details manually.`, 5000);
+    const cleanISBN = isbn.replace(/[^0-9X]/gi, '');
+    document.getElementById('bookISBN').value = cleanISBN;
+    document.getElementById('bookTitle').placeholder = 'Enter title manually';
+    document.getElementById('bookAuthor').placeholder = 'Enter author manually';
   }
 }
 
