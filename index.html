@@ -94,6 +94,12 @@
       white-space: nowrap;
     }
 
+    .header-btn-small {
+      padding: 0.5rem 0.65rem;
+      font-size: 1.1rem;
+      min-width: 40px;
+    }
+
     .header-btn:hover {
       background: rgba(255, 255, 255, 0.3);
       transform: translateY(-1px);
@@ -962,7 +968,8 @@
         <p>Your personal collection across all formats</p>
       </div>
       <div class="header-actions">
-        <button class="header-btn" id="importBtn" data-icon="📥">📥 Import</button>
+        <button class="header-btn header-btn-small" id="importBtn" title="Import Library">📥</button>
+        <button class="header-btn header-btn-small" id="exportBtn" title="Export Library">📤</button>
         <button class="header-btn primary" id="addBookBtn">+ Add Book</button>
       </div>
     </div>
