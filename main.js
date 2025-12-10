@@ -497,8 +497,11 @@ function handleEditBook() {
     console.error('No currentDetailBook set!');
     return;
   }
+  
+  // Save reference before closeDetail clears it
+  const bookToEdit = currentDetailBook;
   closeDetail();
-  openBookModal(currentDetailBook);
+  openBookModal(bookToEdit);
 }
 
 // Handle delete book button
