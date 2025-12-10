@@ -53,6 +53,7 @@ const isbnInput = document.getElementById('isbnInput');
 const isbnLookupBtn = document.getElementById('isbnLookupBtn');
 
 // OCR Elements
+const scanBarcodeBtn = document.getElementById('scanBarcodeBtn');
 const scanTitleBtn = document.getElementById('scanTitleBtn');
 const scanSpineBtn = document.getElementById('scanSpineBtn');
 const ocrCamera = document.getElementById('ocrCamera');
@@ -64,7 +65,15 @@ const ocrLineSelector = document.getElementById('ocrLineSelector');
 const useOcrResultBtn = document.getElementById('useOcrResultBtn');
 const retryOcrBtn = document.getElementById('retryOcrBtn');
 
+// Barcode Elements
+const barcodeCamera = document.getElementById('barcodeCamera');
+const barcodeCameraVideo = document.getElementById('barcodeCameraVideo');
+const barcodeScanStatus = document.getElementById('barcodeScanStatus');
+const barcodeCancelBtn = document.getElementById('barcodeCancelBtn');
+
 let ocrStream = null;
+let barcodeStream = null;
+let barcodeScanning = false;
 let ocrLines = [];
 let selectedLines = {
   title: [],
@@ -131,11 +140,13 @@ function setupEventListeners() {
   });
 
   // OCR listeners
+  scanBarcodeBtn.addEventListener('click', startBarcodeScanner);
   scanTitleBtn.addEventListener('click', () => startOCRCamera('title'));
   scanSpineBtn.addEventListener('click', () => startOCRCamera('spine'));
   ocrCaptureBtn.addEventListener('click', captureAndProcessOCR);
   ocrCancelBtn.addEventListener('click', stopOCRCamera);
   useOcrResultBtn.addEventListener('click', useOCRResult);
+  barcodeCancelBtn.addEventListener('click', stopBarcodeScanner);
   retryOcrBtn.addEventListener('click', () => {
     ocrResultBox.style.display = 'none';
     startOCRCamera('title');
@@ -859,6 +870,255 @@ function autoClassifyFromSubjects(subjects) {
   }
 }
 
+// ============================================================
+// ZXING BARCODE SCANNER (Enhanced ISBN Detection)
+// ============================================================
+
+// Start ZXing barcode scanner
+async function startBarcodeScanner() {
+  try {
+    barcodeStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    
+    barcodeCameraVideo.srcObject = barcodeStream;
+    barcodeCamera.style.display = 'flex';
+    
+    // Wait for video to be ready
+    await new Promise(resolve => {
+      barcodeCameraVideo.onloadedmetadata = resolve;
+    });
+    
+    barcodeScanning = true;
+    scanBarcodeFrame();
+    
+  } catch (error) {
+    console.error('Camera error:', error);
+    alert('Could not access camera. Please check permissions.');
+  }
+}
+
+// Stop barcode scanner
+function stopBarcodeScanner() {
+  barcodeScanning = false;
+  if (barcodeStream) {
+    barcodeStream.getTracks().forEach(track => track.stop());
+    barcodeStream = null;
+  }
+  barcodeCamera.style.display = 'none';
+}
+
+// Scan barcode using ZXing
+async function scanBarcodeFrame() {
+  if (!barcodeScanning) return;
+  
+  try {
+    const codeReader = new ZXing.BrowserMultiFormatReader();
+    
+    // Try to decode from video
+    const result = await codeReader.decodeOnceFromVideoDevice(undefined, barcodeCameraVideo);
+    
+    if (result && result.text) {
+      console.log('✅ Barcode detected:', result.text, 'Format:', result.format);
+      
+      const isbn = result.text.replace(/[^0-9X]/gi, '');
+      
+      // Validate ISBN length
+      if (isbn.length === 10 || isbn.length === 13) {
+        // Check if it starts with 978 or 979 (valid ISBN-13 prefix)
+        const isValidISBN = isbn.length === 10 || 
+                           (isbn.length === 13 && (isbn.startsWith('978') || isbn.startsWith('979')));
+        
+        if (isValidISBN) {
+          barcodeScanStatus.textContent = '✅ ISBN Found: ' + isbn;
+          barcodeScanStatus.style.background = 'rgba(74, 222, 128, 0.9)';
+          
+          setTimeout(() => {
+            stopBarcodeScanner();
+            showToast(`📖 ISBN detected: ${isbn}`);
+            lookupISBN(isbn);
+          }, 500);
+          return;
+        }
+      }
+      
+      // Not a valid ISBN, keep scanning
+      barcodeScanStatus.textContent = 'Not an ISBN barcode, keep scanning...';
+      barcodeScanStatus.style.background = 'rgba(239, 68, 68, 0.9)';
+      setTimeout(() => {
+        barcodeScanStatus.textContent = 'Point camera at ISBN barcode';
+        barcodeScanStatus.style.background = 'rgba(0,0,0,0.7)';
+        if (barcodeScanning) scanBarcodeFrame();
+      }, 1500);
+    }
+    
+  } catch (error) {
+    // No barcode found in this frame, try again
+    if (barcodeScanning) {
+      setTimeout(() => scanBarcodeFrame(), 100);
+    }
+  }
+}
+
+// Lookup ISBN using Open Library API
+async function lookupISBN(isbn) {
+  console.log('=== ISBN LOOKUP START ===');
+  console.log('Original ISBN:', isbn);
+  showToast(`🔍 Looking up: ${isbn}`);
+  
+  try {
+    // Clean ISBN (remove hyphens, spaces)
+    const cleanISBN = isbn.replace(/[^0-9X]/gi, '');
+    console.log('Clean ISBN:', cleanISBN, 'Length:', cleanISBN.length);
+    
+    // If ISBN-10, try to convert to ISBN-13
+    let isbn13 = cleanISBN;
+    if (cleanISBN.length === 10) {
+      isbn13 = convertISBN10to13(cleanISBN);
+      console.log('Converted ISBN-10 to ISBN-13:', isbn13);
+    }
+    
+    // Try both ISBN-13 and ISBN-10
+    const isbnsToTry = cleanISBN.length === 10 ? [isbn13, cleanISBN] : [cleanISBN];
+    
+    for (const isbnToTry of isbnsToTry) {
+      console.log('Trying ISBN:', isbnToTry);
+      
+      // Try Open Library API
+      const url = `https://openlibrary.org/isbn/${isbnToTry}.json`;
+      console.log('Fetching:', url);
+      
+      const response = await fetch(url);
+      console.log('Response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Open Library SUCCESS! Data:', data);
+        
+        // Extract title
+        if (data.title) {
+          document.getElementById('bookTitle').value = data.title;
+        }
+        
+        // Get author info
+        if (data.authors && data.authors.length > 0) {
+          try {
+            const authorKey = data.authors[0].key;
+            const authorResponse = await fetch(`https://openlibrary.org${authorKey}.json`);
+            const authorData = await authorResponse.json();
+            if (authorData.name) {
+              document.getElementById('bookAuthor').value = authorData.name;
+            }
+          } catch (e) {
+            console.error('Author fetch error:', e);
+            if (data.by_statement) {
+              document.getElementById('bookAuthor').value = data.by_statement;
+            }
+          }
+        }
+        
+        // Set ISBN
+        document.getElementById('bookISBN').value = isbnToTry;
+        
+        // Get publication date
+        if (data.publish_date) {
+          document.getElementById('bookPublicationDate').value = data.publish_date;
+        }
+        
+        // Get cover URL
+        if (data.covers && data.covers.length > 0) {
+          const coverId = data.covers[0];
+          document.getElementById('bookCoverUrl').value = `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+        }
+        
+        // Try to get subjects for genre classification
+        if (data.subjects && data.subjects.length > 0) {
+          const subjects = data.subjects.map(s => s.toLowerCase());
+          autoClassifyFromSubjects(subjects);
+        }
+        
+        showToast('✅ Book found! Review and save.');
+        return; // Success!
+      }
+    }
+    
+    // If Open Library failed, try Google Books
+    console.log('Open Library failed for all ISBNs, trying Google Books...');
+    await lookupGoogleBooks(isbn13 || cleanISBN);
+    
+  } catch (error) {
+    console.error('ISBN lookup error:', error);
+    console.log('Error occurred, trying Google Books as backup...');
+    await lookupGoogleBooks(isbn.replace(/[^0-9X]/gi, ''));
+  }
+}
+
+// Convert ISBN-10 to ISBN-13
+function convertISBN10to13(isbn10) {
+  const base = '978' + isbn10.substring(0, 9);
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(base[i]) * (i % 2 === 0 ? 1 : 3);
+  }
+  const checkDigit = (10 - (sum % 10)) % 10;
+  return base + checkDigit;
+}
+
+// Backup lookup using Google Books API
+async function lookupGoogleBooks(isbn) {
+  try {
+    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+    console.log('Fetching Google Books:', url);
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    console.log('Google Books response:', data);
+    
+    if (!data.items || data.items.length === 0) {
+      throw new Error('Book not found in Google Books either');
+    }
+    
+    const book = data.items[0].volumeInfo;
+    console.log('✅ Google Books SUCCESS! Book:', book);
+    
+    // Extract data
+    if (book.title) {
+      document.getElementById('bookTitle').value = book.title;
+    }
+    
+    if (book.authors && book.authors.length > 0) {
+      document.getElementById('bookAuthor').value = book.authors.join(', ');
+    }
+    
+    document.getElementById('bookISBN').value = isbn;
+    
+    if (book.publishedDate) {
+      document.getElementById('bookPublicationDate').value = book.publishedDate;
+    }
+    
+    if (book.imageLinks && book.imageLinks.thumbnail) {
+      document.getElementById('bookCoverUrl').value = book.imageLinks.thumbnail.replace('http:', 'https:');
+    }
+    
+    // Try to classify from categories
+    if (book.categories && book.categories.length > 0) {
+      autoClassifyFromSubjects(book.categories.map(c => c.toLowerCase()));
+    }
+    
+    showToast('✅ Book found (Google Books)! Review and save.');
+    
+  } catch (error) {
+    console.error('Google Books lookup error:', error);
+    console.log('=== LOOKUP FAILED - Book not in any database ===');
+    showToast(`❌ ISBN ${isbn} not found. Enter details manually.`);
+    document.getElementById('bookISBN').value = isbn;
+  }
+}
+
+// ============================================================
+// ENHANCED OCR FOR TITLE/SPINE SCANNING
+// ============================================================
+
 // Start OCR camera
 async function startOCRCamera(mode) {
   try {
@@ -900,20 +1160,55 @@ async function captureAndProcessOCR() {
   stopOCRCamera();
   
   // Show processing message
-  showToast('🔍 Reading text from image... (this takes 3-5 seconds)', 10000);
+  showToast('🔍 Enhancing image and reading text... (5-10 seconds)', 15000);
   
-  // Process with Tesseract
+  // ============================================================
+  // IMAGE PRE-PROCESSING for better OCR accuracy
+  // ============================================================
+  
+  // Get image data
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  
+  // 1. Convert to grayscale
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    data[i] = gray;
+    data[i + 1] = gray;
+    data[i + 2] = gray;
+  }
+  
+  // 2. Increase contrast (makes text darker, background lighter)
+  const contrastFactor = 1.5;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = Math.min(255, Math.max(0, contrastFactor * (data[i] - 128) + 128));
+    data[i + 1] = Math.min(255, Math.max(0, contrastFactor * (data[i + 1] - 128) + 128));
+    data[i + 2] = Math.min(255, Math.max(0, contrastFactor * (data[i + 2] - 128) + 128));
+  }
+  
+  // 3. Apply sharpening (makes edges crisper)
+  const sharpened = applySharpening(imageData, canvas.width, canvas.height);
+  
+  // Put processed image back on canvas
+  ctx.putImageData(sharpened, 0, 0);
+  
+  const processedImage = canvas.toDataURL('image/png');
+  
+  // Process with Tesseract using optimized settings
   try {
     const { data: { text } } = await Tesseract.recognize(
-      canvas.toDataURL('image/jpeg'),
+      processedImage,
       'eng',
       {
         logger: m => {
           if (m.status === 'recognizing text') {
             const progress = Math.round(m.progress * 100);
-            showToast(`📖 Processing: ${progress}%`, 10000);
+            showToast(`📖 Reading text: ${progress}%`, 15000);
           }
-        }
+        },
+        // Optimized Tesseract config for book text
+        tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;\'"-!?&'
       }
     );
     
@@ -924,12 +1219,13 @@ async function captureAndProcessOCR() {
       .split('\n')
       .map(l => l.trim())
       .filter(l => l.length > 2) // Filter out very short lines
-      .filter(l => !/^[^a-zA-Z]*$/.test(l)); // Filter out lines with no letters
+      .filter(l => !/^[^a-zA-Z]*$/.test(l)) // Filter out lines with no letters
+      .filter(l => !l.match(/^[\W_]+$/)); // Filter out lines with only special chars
     
     console.log('Cleaned lines:', ocrLines);
     
     if (ocrLines.length === 0) {
-      showToast('❌ Could not find readable text. Try again with better lighting.');
+      showToast('❌ Could not find readable text. Try again with better lighting or closer to the book.');
       return;
     }
     
@@ -946,6 +1242,46 @@ async function captureAndProcessOCR() {
     console.error('OCR error:', error);
     showToast('❌ OCR failed. Please try again or enter manually.');
   }
+}
+
+// Apply sharpening filter to enhance text edges
+function applySharpening(imageData, width, height) {
+  const data = imageData.data;
+  const output = new ImageData(width, height);
+  const outputData = output.data;
+  
+  // Sharpening kernel
+  const kernel = [
+    0, -1, 0,
+    -1, 5, -1,
+    0, -1, 0
+  ];
+  
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = (y * width + x) * 4;
+      
+      let r = 0, g = 0, b = 0;
+      
+      for (let ky = -1; ky <= 1; ky++) {
+        for (let kx = -1; kx <= 1; kx++) {
+          const kidx = ((y + ky) * width + (x + kx)) * 4;
+          const kvalue = kernel[(ky + 1) * 3 + (kx + 1)];
+          
+          r += data[kidx] * kvalue;
+          g += data[kidx + 1] * kvalue;
+          b += data[kidx + 2] * kvalue;
+        }
+      }
+      
+      outputData[idx] = Math.min(255, Math.max(0, r));
+      outputData[idx + 1] = Math.min(255, Math.max(0, g));
+      outputData[idx + 2] = Math.min(255, Math.max(0, b));
+      outputData[idx + 3] = 255;
+    }
+  }
+  
+  return output;
 }
 
 // Display interactive line selector
